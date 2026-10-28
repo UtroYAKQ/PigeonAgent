@@ -1,0 +1,607 @@
+@import "tailwindcss";
+@import "highlight.js/styles/github.css";
+@import "highlight.js/styles/github-dark.css" screen and (prefers-color-scheme: dark);
+
+/*
+ * PigeonAgent 设计体系 —— Minimal & Direct（OpenAI 那一挂）
+ * 五条纪律，改任何东西前先回到这里：
+ * 1. 三层纸：canvas 页面 / pane 侧栏 / card 组件面，只靠 1px hair 分层，不靠阴影。
+ * 2. 阴影只属于浮层（菜单、弹窗）；常驻界面一律 shadow: none。
+ * 3. 一个 accent（鸽蓝）只表达「Pigeon 在跑 / 在等你」，不做装饰；绿=回填，红=失败，且都带图标。
+ * 4. 字阶 6 档、圆角 4 档、间距 4 的倍数；组件里不出现裸 hex 和任意 px。
+ * 5. 明暗是两套独立调过的值，不是翻转；灰阶全部过 WCAG AA（正文 4.5:1 起）。
+ */
+:root {
+  --canvas: #ffffff;
+  --pane: #f7f7f7;
+  --surface: #ffffff;
+  --inset: #f6f6f5;
+  --hair: #e6e6e6;
+  --hover: #ededed;
+  --ink: #1a1a1a;
+  --muted: #595959;
+  --faint: #767676;
+  --accent: #256d85;
+  --accent-soft: #e9f2f5;
+  --ok: #1a7f37;
+  --warn: #b42318;
+  --backdrop: rgba(26, 26, 26, 0.32);
+
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #1a1a1a;
+    --pane: #141414;
+    --surface: #212121;
+    --inset: #262626;
+    --hair: #333333;
+    --hover: #2f2f2f;
+    --ink: #ededed;
+    --muted: #a3a3a3;
+    --faint: #949494;
+    --accent: #6cc7de;
+    --accent-soft: #1d343b;
+    --ok: #5ad07f;
+    --warn: #ff7a72;
+    --backdrop: rgba(0, 0, 0, 0.6);
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-pane: var(--pane);
+  --color-surface: var(--surface);
+  --color-inset: var(--inset);
+  --color-hair: var(--hair);
+  --color-hover: var(--hover);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+
+  /* 字阶 6 档：display / body / ui / meta / micro（+ 等宽走 font-mono） */
+  --text-display: 30px;
+  --text-display--line-height: 1.25;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 550;
+  --text-body: 16px;
+  --text-body--line-height: 1.7;
+  --text-ui: 13px;
+  --text-ui--line-height: 1.5;
+  --text-meta: 12px;
+  --text-meta--line-height: 1.45;
+  --text-micro: 11px;
+  --text-micro--line-height: 1.4;
+
+  /* 圆角 4 档 */
+  --radius-control: 8px;
+  --radius-surface: 12px;
+  --radius-float: 16px;
+
+  /* 阴影只给浮层用 */
+  --shadow-float: 0 6px 20px -8px rgb(0 0 0 / 0.18);
+  --shadow-modal: 0 24px 70px -12px rgb(0 0 0 / 0.28);
+
+  --ease-out-soft: var(--ease-out);
+  --ease-in-soft: var(--ease-in);
+
+  --font-sans: "Geist Variable", -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+
+  /* 阅读列宽：16px 正文下约 74 字/行 */
+  --measure: 52rem;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+}
+
+#app > * {
+  flex: 1;
+  min-height: 0;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* 焦点只在键盘导航时出现，鼠标点击不抢视觉 */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+/* 文本域自带外层容器（composer 卡片）表达焦点，不再叠一圈环 */
+textarea:focus-visible {
+  outline: none;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  outline-color: color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+/* ---------------------------------------------------------------- 组件 recipe */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  font-size: var(--text-ui);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.86;
+}
+
+.btn-ghost {
+  color: var(--muted);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.btn-danger {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 28%, transparent);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+}
+
+/* 确认弹窗里的主操作：实心 warn；暗色下 warn 太亮，改成同色描底 + 彩字 */
+.btn-danger-solid {
+  background: var(--warn);
+  color: #fff;
+}
+
+.btn-danger-solid:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-danger-solid {
+    background: color-mix(in srgb, var(--warn) 22%, var(--canvas));
+    color: var(--warn);
+  }
+}
+
+/* 浮层卡底栏的动作按钮：和 .btn 同高，字小一档 */
+.btn-card {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  font-size: var(--text-meta);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--faint);
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+.btn-card:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.btn-card:disabled {
+  background: var(--hover);
+  color: var(--faint);
+  cursor: default;
+}
+
+.btn-card-primary {
+  background: var(--ink);
+  color: var(--canvas);
+}
+
+.btn-card-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 88%, transparent);
+  color: var(--canvas);
+}
+
+.btn-card-primary:disabled {
+  background: var(--hover);
+  color: var(--faint);
+}
+
+/* 图标按钮：视觉 28，命中区靠 padding 撑到 32 */
+.btn-icon {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--radius-control);
+  color: var(--faint);
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chip-accent {
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+
+.chip-ok {
+  border-color: color-mix(in srgb, var(--ok) 26%, transparent);
+  background: color-mix(in srgb, var(--ok) 9%, transparent);
+  color: var(--ok);
+}
+
+.chip-warn {
+  border-color: color-mix(in srgb, var(--warn) 26%, transparent);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  color: var(--warn);
+}
+
+.field-label {
+  font-size: var(--text-micro);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--hair);
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: var(--text-ui);
+  outline: none;
+  transition: border-color var(--dur-1) var(--ease-out);
+}
+
+.input:hover {
+  border-color: color-mix(in srgb, var(--ink) 20%, var(--hair));
+}
+
+/* 计数、pager、时间、token 用量一律等宽数字，避免跳动 */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 等界面元素分层：常驻面用 hairline，浮层才用阴影 */
+.float {
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-float);
+  background: var(--canvas);
+  box-shadow: var(--shadow-float);
+}
+
+/* ---------------------------------------------------------------- 聊天正文 */
+
+.prose-chat {
+  font-size: var(--text-body);
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.prose-chat > * + * {
+  margin-top: 0.85em;
+}
+
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  font-size: 1.06em;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-top: 1.4em;
+  letter-spacing: -0.01em;
+}
+
+.prose-chat ul,
+.prose-chat ol {
+  padding-left: 1.35em;
+}
+
+.prose-chat ul {
+  list-style: disc;
+}
+
+.prose-chat ol {
+  list-style: decimal;
+}
+
+.prose-chat li + li {
+  margin-top: 0.35em;
+}
+
+.prose-chat li {
+  padding-left: 0.15em;
+}
+
+.prose-chat code:not(pre code) {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--inset);
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  padding: 0.1em 0.35em;
+}
+
+/* 代码块：外层 .code-frame 负责描边、底色和复制条，pre 自己只管排版 */
+.code-frame {
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-surface);
+  background: var(--inset);
+  overflow: hidden;
+}
+
+.code-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--hair);
+  font-size: var(--text-micro);
+  color: var(--faint);
+}
+
+.code-lang {
+  margin-right: auto;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+.code-btn {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  color: var(--faint);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
+}
+
+.code-btn:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.code-copy {
+  font-size: var(--text-micro);
+}
+
+.prose-chat pre {
+  margin: 0;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  font-size: var(--text-meta);
+  line-height: 1.6;
+}
+
+.prose-chat pre code {
+  font-family: var(--font-mono);
+  background: transparent;
+}
+
+.prose-chat a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--faint);
+}
+
+.prose-chat table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-ui);
+}
+
+.prose-chat th,
+.prose-chat td {
+  border: 1px solid var(--hair);
+  padding: 0.45em 0.7em;
+  text-align: left;
+}
+
+.prose-chat th {
+  background: var(--pane);
+  font-weight: 600;
+}
+
+.prose-chat blockquote {
+  border-left: 2px solid var(--hair);
+  padding-left: 1em;
+  color: var(--muted);
+}
+
+.prose-chat strong {
+  font-weight: 600;
+}
+
+/* 流式光标：挂在最后一个行内块尾部，避免拼在正文下一行 */
+.caret > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 3px;
+  vertical-align: -2px;
+  background: var(--ink);
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+}
+
+.rise {
+  animation: rise var(--dur-2) var(--ease-out) both;
+}
+
+@keyframes slide {
+  to {
+    background-position: -220% 0;
+  }
+}
+
+.thinking-shimmer {
+  background: linear-gradient(90deg, var(--faint) 0%, var(--ink) 45%, var(--faint) 90%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: slide 2.4s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .caret > :last-child::after,
+  .thinking-shimmer {
+    animation: none;
+  }
+}
+
+.code-box {
+  @apply overflow-x-auto rounded-control border border-hair bg-inset px-3 py-2 font-mono text-meta leading-relaxed whitespace-pre-wrap;
+}
+
+/* 细滚动条：只在可滚动区域出现，hover 才加深 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--faint) 28%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--faint) 25%, transparent);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--faint) 45%, transparent);
+}
+
+dialog::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: blur(3px);
+}
+
+.settings-dialog {
+  margin: auto;
+  width: min(56rem, calc(100vw - 2rem));
+  height: min(38rem, calc(100vh - 2rem));
+  max-height: calc(100vh - 2rem);
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-float);
+  background: var(--canvas);
+  color: var(--ink);
+  padding: 0;
+  overflow: hidden;
+  box-shadow: var(--shadow-modal);
+}
+
+.settings-dialog[open] {
+  animation: rise var(--dur-2) var(--ease-out) both;
+}
+
+/* 焦点落在弹窗本身（先读标题），不让关闭按钮一开就顶一圈焦点环 */
+.settings-dialog:focus {
+  outline: none;
+}
+
+@media (max-width: 860px) {
+  :root {
+    --measure: min(100%, 42rem);
+  }
+}

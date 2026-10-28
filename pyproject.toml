@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pigeon-agent"
+version = "0.1.0"
+description = "PigeonAgent backend service"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.14",
+    "asyncpg>=0.30",
+    "bcrypt>=4",
+    "boto3>=1.35",
+    "cryptography>=43",
+    "e2b>=2.31",
+    "fastapi>=0.115",
+    "pydantic-ai-slim[ag-ui,openai]>=2.59.0",
+    "pydantic-settings>=2.6",
+    "pyjwt>=2.10",
+    "python-multipart>=0.0.9",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "tzdata>=2026.5",
+    "uvicorn[standard]>=0.32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "aiosqlite>=0.20",
+    "boto3-stubs[s3]>=1.35",
+    "httpx>=0.28",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+# 注释与文档字符串使用中文标点
+allowed-confusables = ["，", "、", "。", "：", "；", "！", "？", "（", "）", "“", "”", "‘", "’"]
+# conftest 必须先设 SANDBOX_API_KEY 再 import app（import 时就会构造并缓存 Settings）
+[tool.ruff.lint.per-file-ignores]
+"tests/conftest.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["^migrations/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
