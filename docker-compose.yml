@@ -21,7 +21,8 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    # 7.2 是 BSD-3 许可线；7.4+ 改为 RSALv2/SSPL，升级前先确认许可证
+    image: redis:7.2.17-alpine
     container_name: pigeon-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
@@ -36,7 +37,8 @@ services:
       retries: 10
 
   rustfs:
-    image: rustfs/rustfs:latest
+    # 固定版本，避免 latest 漂移；升级时改这里并跑完整门禁
+    image: rustfs/rustfs:1.0.4-glibc
     container_name: pigeon-rustfs
     restart: unless-stopped
     environment:
@@ -61,7 +63,7 @@ services:
       retries: 10
 
   rustfs-init:
-    image: rustfs/rc:latest
+    image: rustfs/rc:v0.1.37
     container_name: pigeon-rustfs-init
     depends_on:
       rustfs:

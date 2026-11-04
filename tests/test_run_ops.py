@@ -122,10 +122,28 @@ async def test_startup_sweep_only_reclaims_expired_leases(db_session: AsyncSessi
     stale.active_run_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     await db_session.commit()
 
-    await run_service.clear_expired_run_leases(db_session)
+    expired = await run_service.clear_expired_run_leases(db_session)
 
     assert (await head(db_session, dead)).active_run_id is None
     assert (await head(db_session, alive)).active_run_id == "run-alive"
+    assert expired == [(dead, "run-dead")]
+
+
+async def test_startup_sweep_marks_crashed_running_run_failed(
+    db_session: AsyncSession,
+) -> None:
+    session_id = await make_session(db_session)
+    crashed = await append_user_run(db_session, session_id, "崩在半路")
+    crashed.status = RunStatus.RUNNING.value
+    chat_session = await head(db_session, session_id)
+    chat_session.active_run_id = str(crashed.id)
+    chat_session.active_run_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db_session.commit()
+
+    await run_service.clear_expired_run_leases(db_session)
+
+    await db_session.refresh(crashed)
+    assert crashed.status == RunStatus.FAILED.value
 
 
 async def test_declare_interrupts_isolated_per_session(db_session: AsyncSession) -> None:

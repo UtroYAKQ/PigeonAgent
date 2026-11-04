@@ -659,17 +659,43 @@ async def renew_run_lease(db: AsyncSession, session_id: UUID, run_id: str) -> No
     await db.commit()
 
 
-async def clear_expired_run_leases(db: AsyncSession) -> None:
-    """启动清扫：只回收已过期的租约，活着的跨进程 run 不受影响。"""
+async def clear_expired_run_leases(db: AsyncSession) -> list[tuple[UUID, str]]:
+    """启动清扫：回收已过期的租约，并返回对应的 (session_id, run_id)。
+
+    调用方用返回值顺手清掉 Redis 里的 active/owner 标记，避免 worker 硬崩后
+    数据库已放行、事件互斥却还要等 TTL 才解除。
+    """
     rows = await db.scalars(select(ChatSession).where(ChatSession.active_run_id.is_not(None)))
-    expired = [chat_session.id for chat_session in rows if not run_is_live(chat_session)]
+    expired = [
+        (chat_session.id, chat_session.active_run_id)
+        for chat_session in rows
+        if not run_is_live(chat_session) and chat_session.active_run_id is not None
+    ]
     if expired:
         await db.execute(
             update(ChatSession)
-            .where(ChatSession.id.in_(expired))
+            .where(ChatSession.id.in_([session_id for session_id, _ in expired]))
             .values(active_run_id=None, active_run_expires_at=None)
         )
+        # worker 硬崩后 run 行可能还停在 running；启动清扫把它标成失败，
+        # 前端/统计不会永远把一条死 run 当成进行中。
+        run_ids: list[UUID] = []
+        for _, run_id in expired:
+            try:
+                run_ids.append(UUID(run_id))
+            except ValueError:
+                continue
+        if run_ids:
+            await db.execute(
+                update(SessionRun)
+                .where(
+                    SessionRun.id.in_(run_ids),
+                    SessionRun.status == RunStatus.RUNNING.value,
+                )
+                .values(status=RunStatus.FAILED.value)
+            )
     await db.commit()
+    return expired
 
 
 async def _lock(db: AsyncSession, session_id: UUID) -> ChatSession:

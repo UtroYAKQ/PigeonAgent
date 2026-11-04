@@ -55,10 +55,16 @@ async def _check_database() -> bool:
     return True
 
 
-async def _sweep_stale_streams() -> None:
+async def _sweep_stale_streams(hub: RenderHub) -> None:
     try:
         async with async_session_factory() as session:
-            await clear_expired_run_leases(session)
+            expired = await clear_expired_run_leases(session)
+        for session_id, run_id in expired:
+            try:
+                # 数据库租约已过期，顺手把 Redis 的 active/owner 标记也解除
+                await hub.finish(session_id, run_id)
+            except Exception:
+                logger.exception("Failed to clear stale stream markers for run %s", run_id)
     except Exception:
         # 启动清扫不能因为数据库暂时不可用而阻断应用启动，但必须留痕排查
         logger.exception("Startup sweep of stale streaming entries failed")
@@ -105,7 +111,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     startup_tasks: list[asyncio.Task[None]] = []
     if await _check_database():
         startup_tasks = [
-            asyncio.create_task(_sweep_stale_streams()),
+            asyncio.create_task(_sweep_stale_streams(app.state.render_hub)),
             asyncio.create_task(_seed_admin()),
             asyncio.create_task(_blob_gc_sweep_once()),
         ]
@@ -119,13 +125,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     operation_logger.start()
     app.state.operation_logger = operation_logger
     sandbox_pool = _start_sandbox_pool(app, runtime_settings)
+    await app.state.run_registry.start()
+    with contextlib.suppress(TimeoutError):
+        # Redis 暂时不可用时不要让启动卡住；listener 会自己重连
+        await app.state.run_registry.wait_ready(seconds=1.0)
     yield
     for task in startup_tasks:
         task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         for task in startup_tasks:
             await task
-    await app.state.run_registry.cancel_all()
+    await app.state.run_registry.aclose()
     await app.state.render_hub.aclose()
     await sandbox_pool.aclose()
     await operation_logger.aclose()
@@ -184,7 +194,12 @@ def _build_render_hub(settings: Settings) -> RenderHub:
     if settings.redis_url:
         from redis.asyncio import Redis
 
-        client = Redis.from_url(settings.redis_url)
+        client = Redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=3,
+            socket_timeout=5,
+            health_check_interval=30,
+        )
         return RenderHub(
             max_backlog=settings.render_queue_max_backlog,
             redis_client=client,
@@ -198,8 +213,29 @@ def _build_rate_limiter(settings: Settings) -> RateLimiter:
     if settings.redis_url:
         from redis.asyncio import Redis
 
-        return RateLimiter(redis_client=Redis.from_url(settings.redis_url))
+        return RateLimiter(
+            redis_client=Redis.from_url(
+                settings.redis_url, socket_connect_timeout=3, health_check_interval=30
+            )
+        )
     return RateLimiter()
+
+
+def _build_run_registry(settings: Settings) -> RunRegistry:
+    """配了 REDIS_URL 就启用跨 worker 取消总线；否则取消只在当前进程内有效。"""
+    if settings.redis_url:
+        from redis.asyncio import Redis
+
+        from app.services.run_control import RunControl
+
+        return RunRegistry(
+            control=RunControl(
+                # Pub/Sub 客户端不挂 health_check，避免心跳 PING 混进消息流
+                Redis.from_url(settings.redis_url, socket_connect_timeout=3),
+                owns_redis=True,
+            )
+        )
+    return RunRegistry()
 
 
 def create_app() -> FastAPI:
@@ -208,7 +244,7 @@ def create_app() -> FastAPI:
     _check_insecure_defaults(settings)
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.state.render_hub = _build_render_hub(settings)
-    app.state.run_registry = RunRegistry()
+    app.state.run_registry = _build_run_registry(settings)
     app.state.rate_limiter = _build_rate_limiter(settings)
     app.state.operation_logger = None
     app.add_exception_handler(AppError, app_error_handler)

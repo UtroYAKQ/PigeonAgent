@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from fakeredis import FakeAsyncRedis
 
 from app.sandbox import pool as sp_mod
 from app.sandbox.pool import SandboxPool, _Entry
@@ -214,3 +215,82 @@ async def test_paused_acquire_skips_renew(
 
     assert await pool.acquire(session, "run-7") is revived
     assert revived.timeouts == []
+
+
+async def test_sandbox_pointer_is_reused_across_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """两个 worker 共享 Redis 指针：第二个 worker 直接 connect 远端沙箱，不新建。"""
+    client = FakeAsyncRedis()
+    settings = _settings()
+    worker_a = SandboxPool(settings, redis_client=client)  # type: ignore[arg-type]
+    worker_b = SandboxPool(settings, redis_client=client)  # type: ignore[arg-type]
+    shared = _FakeSandbox("sbx-shared")
+    resumed = _FakeSandbox("sbx-shared")
+    connects: list[str] = []
+
+    async def fake_create(_settings: Any) -> Any:
+        return shared
+
+    async def fake_connect(_settings: Any, sandbox_id: str) -> Any:
+        connects.append(sandbox_id)
+        return resumed
+
+    monkeypatch.setattr(sp_mod, "create_sandbox", fake_create)
+    monkeypatch.setattr(sp_mod, "connect_sandbox", fake_connect)
+
+    session = uuid4()
+    assert await worker_a.acquire(session, "run-a") is shared
+    await worker_a.release(session)
+    assert shared.paused
+
+    assert await worker_b.acquire(session, "run-b") is resumed
+    assert connects == ["sbx-shared"]
+
+    # A 的本地句柄已过时；巡检不能把 B 正在用的沙箱杀掉
+    worker_a._entries[session].last_touch = time.monotonic() - 10_000.0
+    await worker_a._sweep_once()
+    assert not shared.killed
+    assert session not in worker_a._entries
+
+    await worker_b.discard(session)
+    assert resumed.killed
+    assert await client.get(f"pigeon:sandbox:{session}") is None
+
+    await worker_a.aclose()
+    await worker_b.aclose()
+
+
+async def test_active_sandbox_is_not_shared_across_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """一个 worker 还在跑时，另一个 worker 即使拿到租约也新建隔离沙箱，不共享容器。"""
+    client = FakeAsyncRedis()
+    settings = _settings()
+    worker_a = SandboxPool(settings, redis_client=client)  # type: ignore[arg-type]
+    worker_b = SandboxPool(settings, redis_client=client)  # type: ignore[arg-type]
+    first = _FakeSandbox("sbx-a")
+    second = _FakeSandbox("sbx-b")
+    created = [first, second]
+    connects: list[str] = []
+
+    async def fake_create(_settings: Any) -> Any:
+        return created.pop(0)
+
+    async def fake_connect(_settings: Any, sandbox_id: str) -> Any:
+        connects.append(sandbox_id)
+        raise AssertionError("活跃中的远端沙箱不应该被共享")
+
+    monkeypatch.setattr(sp_mod, "create_sandbox", fake_create)
+    monkeypatch.setattr(sp_mod, "connect_sandbox", fake_connect)
+
+    session = uuid4()
+    assert await worker_a.acquire(session, "run-a") is first
+    assert await worker_b.acquire(session, "run-b") is second
+    assert connects == []
+
+    # A 收尾时远端已经指向 B 的新沙箱，A 的旧沙箱要回收
+    await worker_a.release(session)
+    assert first.killed
+    await worker_b.discard(session)
+    assert second.killed
+    assert await client.get(f"pigeon:sandbox:{session}") is None
+
+    await worker_a.aclose()
+    await worker_b.aclose()

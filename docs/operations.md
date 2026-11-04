@@ -53,11 +53,19 @@ uv run alembic upgrade head
 
 ## 多 worker
 
-配置 `REDIS_URL` 后才可以启动多个 uvicorn worker；否则事件队列和活跃 run 租约只存在进程内。多 worker 时：
+配置 `REDIS_URL` 后可以启动多个 uvicorn worker（例如 `uvicorn app.main:app --workers 4`）。跨进程共享的状态包括：
 
-- 所有 worker 必须连同一个 Redis 和同一个 PostgreSQL。
-- 事件保留时间 `RENDER_RETAIN_SECONDS` 要覆盖客户端断线重连的窗口。
-- 后台任务（对象 GC、操作日志清理）目前按单实例设计；如果需要多实例，先确认任务不会重复执行。
+- SSE 事件流与会话活跃 run 租约。
+- run 归属键与取消 Pub/Sub：停止生成请求可以落到任意 worker。
+- 沙箱指针：下一轮 run 被调度到其他 worker 时会复用同一个远端沙箱。
+
+所有 worker 必须连接同一个 Redis 和同一个 PostgreSQL，并使用相同的 `SECRET_KEY`。事件保留时间 `RENDER_RETAIN_SECONDS` 要覆盖客户端断线重连的窗口。
+
+run 的活跃标记由租约心跳续期；worker 硬崩后最多约 10 分钟自动解除，不需要手工清 Redis。启动清扫会把过期租约对应的残留 `running` run 标成 `failed`，并顺手清掉 Redis 的 active/owner 标记。取消消息同时落一个 durable 标记，listener 断线重连后会补查，避免 Pub/Sub 丢消息导致停止生成失效。
+
+后台巡检（对象 GC、操作日志清理）在每个 worker 各跑一份；删除和清理操作是幂等的，重复执行只会多一次日志/删除请求，不会损坏数据。如果希望严格单实例巡检，把维护任务拆成独立的进程或外部 CronJob，而不是依赖某个固定 worker。
+
+滚动发布时新旧 worker 会短暂并存：先确认新版本能读旧的 `SECRET_KEY` 和数据库，再逐步替换；不要把正在运行的 run 所在的 worker 直接杀掉，租约到期后它会在日志/客户端里表现为中断。
 
 ## 备份
 

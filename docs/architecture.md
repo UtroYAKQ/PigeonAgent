@@ -26,11 +26,11 @@ FastAPI（app/）
 ## 一次 run 的生命周期
 
 1. **创建 run**：客户端向 `POST /sessions/{id}/runs` 提交用户消息、模型和思考挡位。`run_store.create_run` 写入 `session_runs`，并通过 `parent_run_id` 把新 run 挂到当前分支节点上。
-2. **占用会话租约**：同一会话同一时间只允许一个活跃 run。进程内用 `RunRegistry`，配置 `REDIS_URL` 后由 Redis 的 `SET NX` 跨进程互斥；租约到期可由后续请求接管。
+2. **占用会话租约**：同一会话同一时间只允许一个活跃 run。数据库的 `sessions.active_run_id` 记录当前 run；配置 `REDIS_URL` 后 `RenderHub` 用 Redis `SET NX` 做跨进程互斥，租约到期可由后续请求接管。`RunRegistry` 在本进程保存取消令牌，并通过 Redis 归属键 + Pub/Sub 支持跨 worker 取消。
 3. **构建上下文**：`services/run.execute_run` 沿当前分支回溯，加载 run items；存在 `CompactionItem` 时只回灌压缩点之后的内容。未决审批或外部调用所在的分支不会被压缩。
 4. **流式执行**：`agents/turn.AgentTurn` 调用 Pydantic AI 的流式接口，把模型输出、思维链、工具调用、工具结果和用量转换成 AG-UI 事件；同时把有语义的片段写成 run item（`app/domain/run_items.py`）。
 5. **事件分发**：`render/RenderHub` 把事件写入会话事件流。单进程使用内存队列，超出 backlog 落临时 jsonl；配置 Redis 后使用 Redis Streams，支持多 worker 和迟到消费者回放。
-6. **结算与收尾**：收到最终结果事件后，按 `RunUsage` 的增量记录用量并结算积分，标记 run 为完成。取消、异常或客户端断开时，已完成模型请求的用量会通过兜底路径补记，避免统计漏账。
+6. **取消与收尾**：取消请求可以在任意 worker 进入；本地有令牌就直接取消，否则先确认 Redis 归属键仍然存在，再通过 Pub/Sub 广播给持有该 run 的 worker。收到最终结果后按 `RunUsage` 增量记录用量并结算积分；取消、异常或客户端断开时，已完成模型请求的用量会通过兜底路径补记。沙箱模式下，`SandboxPool` 把远端沙箱指针写入 Redis，run 漂到其他 worker 时会 connect 同一个沙箱，工作区文件不会丢。
 7. **前端投影**：`frontend/src/stores/chat.ts` 合并历史 run 与实时事件，`frontend/src/lib/turnModel.ts` 把 item 序列投影成「思维链 / 正文 / 产物」三类分段；刷新后从事件流回放或重新拉取 run 树。
 
 ## 数据模型

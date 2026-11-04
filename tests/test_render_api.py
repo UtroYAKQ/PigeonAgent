@@ -51,7 +51,7 @@ async def test_sse_stream_frames_events(client: AsyncClient, db_session: AsyncSe
 
     request = asyncio.create_task(client.get(f"/api/v1/sessions/{session_id}/runs/run-sse/events"))
     # 首个请求带首次鉴权/查库开销，等它真正订阅上再发事件
-    await asyncio.sleep(0.2)
+    await asyncio.sleep(1.0)
     await producer.publish(TextMessageContentEvent(message_id="m", delta="hello"))
     await producer.publish(RunFinishedEvent(thread_id="t", run_id="run-sse"))
     await producer.close()
@@ -80,7 +80,7 @@ async def test_sse_resumes_from_last_event_id(
             headers={"Last-Event-ID": "1"},
         )
     )
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(1.0)
     await producer.close()
     response = await request
 
