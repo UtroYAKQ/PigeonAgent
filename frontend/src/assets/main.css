@@ -1,0 +1,821 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+@custom-variant data-open (&[data-state="open"]);
+@custom-variant data-closed (&[data-state="closed"]);
+
+@font-face {
+  font-family: "LXGW WenKai Mono";
+  src: url("./fonts/LXGWWenKaiMono-Title.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", "Noto Sans SC Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-title: "LXGW WenKai Mono", "Noto Sans SC Variable", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Noto Sans SC Variable", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-heading: var(--font-sans);
+
+  /* 对话列宽：窄屏沿用 760，大屏按视口放宽但封顶 1024，免得行长失控 */
+  --container-chat: var(--chat-column);
+  --container-chat-hero: calc(var(--chat-column) - 40px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-soft: var(--brand-soft);
+  --color-chat: var(--chat-bg);
+  --color-code: var(--code-bg);
+  --color-code-foreground: var(--code-fg);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 24px;
+
+  /* 扫光：白底上比 opacity 脉冲明显得多（--muted 在浅色主题里几乎等于背景色） */
+  --animate-shimmer: shimmer 1.5s ease-in-out infinite;
+}
+
+:root {
+  color-scheme: light;
+  --radius: 10px;
+  --chat-column: clamp(760px, 60vw, 1024px);
+
+  --background: #ffffff;
+  --foreground: #0d0d0d;
+  --card: #ffffff;
+  --card-foreground: #0d0d0d;
+  --popover: #ffffff;
+  --popover-foreground: #0d0d0d;
+  --primary: #0d0d0d;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f2f3;
+  --secondary-foreground: #0d0d0d;
+  --muted: #f7f7f8;
+  --muted-foreground: #6e6e80;
+  --accent: #ededed;
+  --accent-foreground: #0d0d0d;
+  --destructive: #c2413b;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: rgba(63, 111, 160, 0.3);
+
+  --surface: #f7f7f8;
+  --surface-strong: #ededed;
+  --brand: #3f6fa0;
+  --brand-foreground: #ffffff;
+  --brand-soft: rgba(63, 111, 160, 0.09);
+  --chat-bg: #ffffff;
+  --code-bg: #fafafa;
+  /* markstream 会在自己的根节点覆盖 --code-bg，这里留一份不受影响的别名 */
+  --code-surface: var(--code-bg);
+  --code-fg: #1a1a1a;
+
+  --sidebar: #f7f7f8;
+  --sidebar-foreground: #0d0d0d;
+  --sidebar-border: #e5e5e5;
+  --sidebar-accent: #ececee;
+  --sidebar-accent-foreground: #0d0d0d;
+  --sidebar-ring: rgba(63, 111, 160, 0.26);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: #212121;
+  --foreground: #ececec;
+  --card: #2f2f2f;
+  --card-foreground: #ececec;
+  --popover: #2f2f2f;
+  --popover-foreground: #ececec;
+  --primary: #ececec;
+  --primary-foreground: #171717;
+  --secondary: #2f2f2f;
+  --secondary-foreground: #ececec;
+  --muted: #2a2a2a;
+  --muted-foreground: #9f9fab;
+  --accent: #303030;
+  --accent-foreground: #f2f2f2;
+  --destructive: #f08c85;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.13);
+  --ring: rgba(126, 166, 201, 0.4);
+
+  --surface: #2f2f2f;
+  --surface-strong: #303030;
+  --brand: #7ea6c9;
+  --brand-foreground: #14202b;
+  --brand-soft: rgba(126, 166, 201, 0.14);
+  --chat-bg: #1b1b1b;
+  --code-bg: #1b1b1b;
+  --code-fg: #e8e8e8;
+
+  --sidebar: #1b1b1b;
+  --sidebar-foreground: #ececec;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-accent: #2a2a2a;
+  --sidebar-accent-foreground: #f4f4f4;
+  --sidebar-ring: rgba(126, 166, 201, 0.34);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+    outline-color: var(--ring);
+  }
+
+  /* 控制台与登录页沿用模板的中性焦点环，不把鸽羽蓝带进后台 */
+  .console-surface {
+    --ring: rgba(13, 13, 13, 0.22);
+    --sidebar-ring: rgba(13, 13, 13, 0.22);
+  }
+
+  .dark .console-surface {
+    --ring: rgba(255, 255, 255, 0.28);
+    --sidebar-ring: rgba(255, 255, 255, 0.28);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.6;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    overscroll-behavior: none;
+  }
+
+  ::selection {
+    background: rgba(63, 111, 160, 0.2);
+  }
+
+  button,
+  input,
+  textarea {
+    font-family: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Edge/Firefox 的标准滚动条属性；Windows 11 的 Fluent overlay 滚动条
+     在部分版本会忽略 ::-webkit-scrollbar，退回系统深色细条 */
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 32%, transparent) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--muted-foreground) 24%, transparent);
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--muted-foreground) 42%, transparent);
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .hairline {
+    border: 1px solid var(--border);
+  }
+
+  .fade-in {
+    animation: content-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes content-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 配合 -translate-x-full：高光条从左侧滑到右侧，循环扫过占位块 */
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.preview-panel-enter-active,
+.preview-panel-leave-active {
+  transition:
+    width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+.preview-panel-enter-from,
+.preview-panel-leave-to {
+  width: 0 !important;
+  opacity: 0;
+}
+
+.search-reveal-enter-active,
+.search-reveal-leave-active {
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+
+.search-reveal-enter-from,
+.search-reveal-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preview-panel-enter-active,
+  .preview-panel-leave-active,
+  .search-reveal-enter-active,
+  .search-reveal-leave-active {
+    transition: none;
+  }
+}
+
+/* ---------------------------------- markdown --------------------------------- */
+
+.markdown {
+  font-size: 16px;
+  line-height: 1.72;
+  color: var(--foreground);
+  overflow-wrap: break-word;
+}
+
+/* markstream-vue 自带的 --ms-* 排版 token，这里映射回项目原有的正文规格 */
+.markdown .markstream-vue {
+  --ms-text-body: 16px;
+  --ms-leading-body: 1.72;
+  --ms-flow-paragraph-y: 0.85em;
+  --ms-flow-list-y: 0.8em;
+  --ms-flow-list-item-y: 0.32em;
+  --ms-flow-list-indent: 1.45em;
+  --ms-flow-list-indent-mobile: 1.45em;
+  --ms-flow-table-y: 1.1em;
+  --ms-flow-table-cell: 9px 14px;
+  --ms-flow-blockquote-y: 1em;
+  --ms-flow-blockquote-indent: 1em;
+  --ms-flow-hr-y: 2em;
+  --ms-flow-heading-1-mt: 1.6em;
+  --ms-flow-heading-1-mb: 0.65em;
+  --ms-flow-heading-2-mt: 1.6em;
+  --ms-flow-heading-2-mb: 0.65em;
+  --ms-flow-heading-3-mt: 1.6em;
+  --ms-flow-heading-3-mb: 0.65em;
+  --ms-flow-heading-4-mt: 1.6em;
+  --ms-flow-heading-4-mb: 0.65em;
+  --ms-text-h1: 1.5em;
+  --ms-text-h2: 1.3em;
+  --ms-text-h3: 1.12em;
+  --ms-text-h4: 1em;
+  --ms-leading-h1: 1.35;
+  --ms-leading-h2: 1.35;
+  --ms-leading-h3: 1.35;
+  --ms-weight-h1: 600;
+  --ms-weight-h2: 600;
+  --ms-weight-h3: 600;
+  --ms-weight-h4: 600;
+  --link-color: var(--foreground);
+  --inline-code-bg: var(--surface);
+  --inline-code-fg: var(--foreground);
+  --blockquote-fg: var(--muted-foreground);
+  --blockquote-border: var(--border);
+  --table-border: var(--border);
+  --table-header-bg: var(--surface);
+  /* 长消息保持整段参与布局，避免 content-visibility 引起的滚动跳动 */
+  content-visibility: visible;
+  contain: none;
+  contain-intrinsic-size: none;
+}
+
+.markdown > *:first-child,
+/* 分块渲染后真正的首尾元素在块容器里面 */
+.markdown .node-slot:first-child > .node-content > *:first-child {
+  margin-top: 0;
+}
+
+.markdown > *:last-child,
+.markdown .node-slot:last-child > .node-content > *:last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0.85em 0;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 1.6em 0 0.65em;
+  color: var(--foreground);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+}
+
+.markdown h1 {
+  font-size: 1.5em;
+  letter-spacing: -0.03em;
+}
+
+.markdown h2 {
+  font-size: 1.3em;
+  letter-spacing: -0.025em;
+}
+
+.markdown h3 {
+  font-size: 1.12em;
+}
+
+.markdown h4 {
+  font-size: 1em;
+}
+
+.markdown strong {
+  font-weight: 600;
+}
+
+.markdown a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--foreground) 28%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms ease;
+}
+
+.markdown a:hover {
+  text-decoration-color: var(--brand);
+}
+
+.markdown .link-node {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--foreground) 28%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms ease;
+}
+
+.markdown .link-node:hover {
+  text-decoration-color: var(--brand);
+}
+
+.markdown .heading-node,
+.markdown .strong-node {
+  font-weight: 600;
+}
+
+.markdown .heading-node {
+  line-height: 1.35;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0.8em 0;
+  padding-left: 1.45em;
+}
+
+.markdown li {
+  margin: 0.32em 0;
+}
+
+.markdown ol > li {
+  padding-left: 0.2em;
+}
+
+.markdown ul > li {
+  padding-left: 0.1em;
+}
+
+.markdown .list-item {
+  padding-left: 0.1em;
+}
+
+.markdown ol > .list-item {
+  padding-left: 0.2em;
+}
+
+.markdown li > p {
+  margin: 0.2em 0;
+}
+
+.markdown .list-item > .paragraph-node {
+  margin: 0.2em 0;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown blockquote {
+  margin: 1em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.markdown .blockquote {
+  margin: 1em 0;
+  padding-left: 1em;
+  border-left: 2px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.markdown hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.markdown code:not(pre code) {
+  padding: 0.13em 0.38em;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  color: var(--foreground);
+  white-space: break-spaces;
+}
+
+.markdown .inline-code {
+  padding: 0.13em 0.38em;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  color: var(--foreground);
+  white-space: break-spaces;
+}
+
+.markdown pre {
+  margin: 1em 0;
+}
+
+/* markstream 给表格自带滚动容器和列宽拖拽，这里换回原来的表格外观 */
+.markdown .table-node-wrapper {
+  margin: 1.1em 0;
+  overflow-x: auto;
+  /* 横向滑到表格边缘时不要把整页一起拖着偏走 */
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 38%, transparent) transparent;
+}
+
+.markdown .table-node,
+.markdown table {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-collapse: collapse;
+  border-spacing: 0;
+  border-radius: 0;
+  box-shadow: none;
+  table-layout: auto;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.markdown th,
+.markdown td {
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  vertical-align: top;
+  /* 一个长链接就能把 min-content 撑出屏幕，允许任意位置断开才压得回来 */
+  overflow-wrap: anywhere;
+}
+
+.markdown th {
+  background: var(--surface);
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.markdown .table-node th,
+.markdown .table-node td {
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.markdown .table-node thead th {
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+
+.markdown .table-node th:last-child,
+.markdown .table-node td:last-child {
+  border-right: 1px solid var(--border);
+}
+
+.markdown .table-node tbody tr:nth-child(2n),
+.markdown .table-node tbody tr:hover {
+  background: transparent;
+}
+
+.markdown .table-node tbody tr:last-child td {
+  border-bottom: 1px solid var(--border);
+}
+
+.markdown .table-node__resize-handle {
+  display: none;
+}
+
+.markdown img {
+  max-width: 100%;
+  border-radius: 10px;
+}
+
+.markdown input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: var(--brand);
+}
+
+/* Code blocks rendered by markstream-vue + shiki */
+.md-code {
+  overflow: hidden;
+  margin: 1em 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--code-surface);
+}
+
+.md-code__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.md-code__body {
+  overflow-x: auto;
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 13.2px;
+  line-height: 1.65;
+  tab-size: 2;
+}
+
+.md-code__body pre {
+  margin: 0;
+  background: transparent !important;
+}
+
+.md-code__body code {
+  font-family: inherit;
+}
+
+.markdown-wrap-code .md-code__body {
+  overflow-x: hidden;
+}
+
+.markdown-wrap-code .md-code__body pre,
+.markdown-wrap-code .md-code__body .shiki,
+.markdown-wrap-code .md-code__body code,
+.markdown-wrap-code .md-code__body .shiki span {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.md-code__body .shiki,
+.md-code__body .shiki span {
+  background: transparent !important;
+}
+
+.md-code__body,
+.markdown .table-node-wrapper,
+.pigeon-code .overflow-auto {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 38%, transparent) transparent;
+}
+
+.md-code__body::-webkit-scrollbar,
+.markdown .table-node-wrapper::-webkit-scrollbar,
+.pigeon-code .overflow-auto::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.md-code__body::-webkit-scrollbar-track,
+.markdown .table-node-wrapper::-webkit-scrollbar-track,
+.pigeon-code .overflow-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.md-code__body::-webkit-scrollbar-thumb,
+.markdown .table-node-wrapper::-webkit-scrollbar-thumb,
+.pigeon-code .overflow-auto::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted-foreground) 38%, transparent);
+  background-clip: content-box;
+}
+
+.md-code__body::-webkit-scrollbar-thumb:hover,
+.markdown .table-node-wrapper::-webkit-scrollbar-thumb:hover,
+.pigeon-code .overflow-auto::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+  background-clip: content-box;
+}
+
+.md-code__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.md-code__copy,
+.md-code__expand {
+  display: inline-flex;
+  height: 24px;
+  align-items: center;
+  gap: 5px;
+  border-radius: 6px;
+  padding: 0 7px;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.md-code__copy:hover,
+.md-code__expand:hover {
+  background: var(--surface-strong);
+  color: var(--foreground);
+}
+
+.dark .md-code__body .shiki span {
+  color: var(--shiki-dark) !important;
+}
+
+/* Neutralize decorative shadows */
+[data-slot="dialog-content"],
+[data-slot="alert-dialog-content"],
+[data-slot="dropdown-menu-content"],
+[data-slot="popover-content"],
+[data-slot="tooltip-content"],
+[data-slot="sheet-content"],
+[data-slot="select-content"] {
+  box-shadow: none !important;
+}
+
+/* AI Elements CodeBlock skin */
+.pigeon-code,
+.pigeon-code pre {
+  background: var(--code-bg) !important;
+  border-color: var(--border);
+}
+
+/* 侧栏代码视图铺满面板，滚动条自然落在最底部 */
+.panel-code {
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-code > div {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pigeon-code pre {
+  padding: 12px 14px !important;
+  font-size: 12.5px !important;
+  line-height: 1.65 !important;
+}
+
+.pigeon-code pre code,
+.pigeon-code pre span {
+  font-size: 12.5px !important;
+}
+
+.pigeon-code .shiki {
+  background: transparent !important;
+}
+
+.dark .pigeon-code,
+.dark .pigeon-code pre {
+  background: #0f0f10 !important;
+  border-color: #26262a;
+}
+
+[data-slot="sheet-overlay"] {
+  background: rgba(13, 13, 13, 0.28);
+}
+
+[data-slot="dialog-overlay"],
+[data-slot="alert-dialog-overlay"] {
+  background: rgba(13, 13, 13, 0.3);
+}
+
+.dark [data-slot="sheet-overlay"],
+.dark [data-slot="dialog-overlay"],
+.dark [data-slot="alert-dialog-overlay"] {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+[data-slot="sheet-overlay"],
+[data-slot="dialog-overlay"],
+[data-slot="alert-dialog-overlay"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}

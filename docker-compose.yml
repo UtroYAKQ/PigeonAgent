@@ -1,0 +1,134 @@
+name: pigeon
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: pigeon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pigeon
+      POSTGRES_USER: pigeon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - pigeon
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pigeon -d pigeon"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pigeon-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - pigeon
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: pigeon-rustfs
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in .env}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env}
+      RUSTFS_REGION: ${S3_REGION:-us-east-1}
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+    # 浏览器直连对象存储取图；HTTPS 站点需再套一层 TLS 反代，否则会被混合内容拦截
+    ports:
+      - "${S3_PUBLIC_PORT:-9000}:9000"
+    volumes:
+      - rustfs-data:/data
+    networks:
+      - pigeon
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:9000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  rustfs-init:
+    image: rustfs/rc:latest
+    container_name: pigeon-rustfs-init
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:?set S3_ACCESS_KEY in .env}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:?set S3_SECRET_KEY in .env}
+      S3_BUCKET: ${S3_BUCKET:-pigeon-files}
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - >
+        until /usr/bin/rc alias set rustfs http://rustfs:9000 "$$RUSTFS_ACCESS_KEY" "$$RUSTFS_SECRET_KEY"; do sleep 2; done &&
+        /usr/bin/rc ls "rustfs/$$S3_BUCKET" >/dev/null 2>&1 || /usr/bin/rc mb "rustfs/$$S3_BUCKET"
+    networks:
+      - pigeon
+    restart: "no"
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/backend.Dockerfile
+    image: pigeon-backend:latest
+    container_name: pigeon-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
+    networks:
+      - pigeon
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    image: pigeon-frontend:latest
+    container_name: pigeon-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - pigeon
+
+volumes:
+  postgres-data:
+  redis-data:
+  rustfs-data:
+
+networks:
+  pigeon:
+    name: pigeon-net

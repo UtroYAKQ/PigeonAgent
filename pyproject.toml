@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pigeon-agent"
+version = "0.1.0"
+description = "PigeonAgent — an LLM agent workbench with a FastAPI backend and Vue web client"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "PigeonAgent contributors" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["llm", "agent", "fastapi", "pydantic-ai", "vue", "ag-ui"]
+dependencies = [
+    "alembic>=1.14",
+    "asyncpg>=0.30",
+    "bcrypt>=4",
+    "boto3>=1.35",
+    "cryptography>=43",
+    "e2b>=2.31",
+    "email-validator>=2.2",
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "litellm>=1.83.0",
+    "pydantic-ai-slim[ag-ui,openai]>=2.59.0",
+    "pydantic-settings>=2.6",
+    "pyjwt>=2.10",
+    "python-multipart>=0.0.9",
+    "redis[hiredis]>=5.2",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "tzdata>=2026.5",
+    "uvicorn[standard]>=0.32",
+]
+
+[project.optional-dependencies]
+dev = [
+    "aiosqlite>=0.20",
+    "boto3-stubs[s3]>=1.35",
+    "fakeredis>=2.26",
+    "moto[server]>=5.0",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-asyncio>=1.0",
+    "ruff>=0.8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+# 注释与文档字符串使用中文标点
+allowed-confusables = ["，", "、", "。", "：", "；", "！", "？", "（", "）", "“", "”", "‘", "’", "×"]
+# conftest 必须在 import app 前落好 SECRET_KEY / SANDBOX_API_KEY 等环境变量
+[tool.ruff.lint.per-file-ignores]
+"tests/conftest.py" = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["^migrations/", "^scripts/"]
+
+# 测试大量使用 Fake 对象和 pydantic-ai 内部类型；先让门禁覆盖应用代码
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

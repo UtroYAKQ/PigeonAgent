@@ -1,0 +1,90 @@
+html {
+  scrollbar-gutter: stable;
+}
+
+html,
+body {
+  overflow-x: clip;
+}
+
+:root {
+  --motion-duration-instant: 120ms;
+  --motion-duration-fast: 220ms;
+  --motion-duration-base: 460ms;
+  --motion-duration-slow: 900ms;
+  --motion-duration-draw: 1600ms;
+
+  --motion-ease-flight: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-ease-fold: cubic-bezier(0.65, 0, 0.35, 1);
+  --motion-ease-draw: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --motion-delay-1: 80ms;
+  --motion-delay-2: 160ms;
+  --motion-delay-3: 280ms;
+  --motion-delay-4: 420ms;
+  --motion-delay-5: 600ms;
+  --motion-delay-6: 820ms;
+
+  --motion-stagger: 70ms;
+}
+
+/* 路由切换：短离场 + 入场；duration 在 App.vue 里显式指定，不会卡在 transitionend */
+.page-flight-enter-active {
+  transition:
+    opacity 240ms var(--motion-ease-flight),
+    transform 240ms var(--motion-ease-flight);
+}
+
+.page-flight-leave-active {
+  transition:
+    opacity 160ms ease-in,
+    transform 160ms ease-in;
+}
+
+.page-flight-enter-from {
+  opacity: 0;
+  transform: translate3d(20px, 0, 0);
+}
+
+.page-flight-leave-to {
+  opacity: 0;
+  transform: translate3d(-12px, 0, 0);
+}
+
+/* 会话内容加载完成后的入场，避免切换会话时内容“凭空出现” */
+.session-content {
+  animation: session-content-in 280ms var(--motion-ease-flight) backwards;
+}
+
+@keyframes session-content-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-instant: 1ms;
+    --motion-duration-fast: 1ms;
+    --motion-duration-base: 1ms;
+    --motion-duration-slow: 1ms;
+    --motion-duration-draw: 1ms;
+    --motion-delay-1: 0ms;
+    --motion-delay-2: 0ms;
+    --motion-delay-3: 0ms;
+    --motion-delay-4: 0ms;
+    --motion-delay-5: 0ms;
+    --motion-delay-6: 0ms;
+    --motion-stagger: 0ms;
+  }
+
+  .page-flight-enter-active,
+  .page-flight-leave-active {
+    transition: none;
+  }
+
+  .session-content {
+    animation: none;
+  }
+}

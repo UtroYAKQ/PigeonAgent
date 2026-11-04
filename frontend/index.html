@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="PigeonAgent — 自托管的 AI 工作台。所思未竟，翼展新知。把想法交给信鸽，留下思考飞过的轨迹。" />
+    <meta name="theme-color" content="#212121" />
+    <script>
+      try {
+        var pref = localStorage.getItem('pigeon.theme') || 'dark'
+        try { pref = JSON.parse(pref) } catch (e) {}
+        var dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        var meta = document.querySelector('meta[name="theme-color"]')
+        if (meta) meta.setAttribute('content', dark ? '#212121' : '#ffffff')
+      } catch (e) {}
+    </script>
+    <title>PigeonAgent</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

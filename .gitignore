@@ -1,0 +1,45 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+.venv/
+venv/
+env/
+
+.env
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+mig_check.txt
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.idea/
+.vscode/
+.DS_Store
+
+# frontend
+frontend/node_modules/
+frontend/.vite/
+frontend/.env.local
+frontend/tmp-probe/
+frontend/run-probe.cjs
+frontend/transpile-probe.cjs
+
+# local mock runtime
+.mock/
+
+# personal notes and local-only tooling
+.workbuddy/
+.backup/
+.private/
+
+# 本地讨论用预览页，不入库
+.preview/

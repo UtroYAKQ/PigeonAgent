@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible defect in PigeonAgent
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先确认这是可复现的问题，并删除日志中的密钥、token、Cookie 和用户数据。
+        安全问题请不要走公开 issue，按 SECURITY.md 私下报告。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 发生了什么，和你的预期有什么不同？
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 进入 ...
+        2. 点击 ...
+        3. 看到 ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 提交
+      description: 发布版本号或 git commit；如果用的是 main，请写分支和日期。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响范围
+      options:
+        - 后端 / API
+        - 前端 / 对话界面
+        - 模型或工具
+        - 文件 / 对象存储
+        - 部署 / Docker
+        - 文档
+        - 其他
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志或截图
+      description: 请粘贴相关日志（已脱敏）或截图。
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 确认
+      options:
+        - label: 我已搜索过现有 issue，没有找到重复报告。
+          required: true
+        - label: 我已移除日志和截图中的密钥、token、Cookie 与个人信息。
+          required: true
