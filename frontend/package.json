@@ -22,7 +22,7 @@
     "@vueuse/motion": "^3.0.3",
     "axios": "^1.21.0",
     "class-variance-authority": "^0.7.1",
-    "cn": "^0.5.0",
+    "cn": "^0.5.1",
     "js-beautify": "^2.0.3",
     "katex": "^0.19.1",
     "markstream-vue": "^2.0.23",
