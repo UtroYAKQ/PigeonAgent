@@ -29,7 +29,11 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 - SSE 事件流由 Redis Streams 承载，迟到的标签页可以回放。
 - 「每会话一个活跃 run」的互斥跨进程共享，可以启动多个 uvicorn worker。
+- **跨 worker 取消**：run 的归属键、取消标记和取消 Pub/Sub 放进 Redis；取消请求落到任意 worker 都能送达持有该 run 的进程，listener 重连后会补查取消标记。
+- **跨 worker 沙箱复用**：`SandboxPool` 把远端沙箱指针写进 Redis，下一轮 run 漂到另一个 worker 时会 connect 同一个沙箱，工作区文件不会丢；如果检测到另一个 worker 仍在用该沙箱，会新建隔离沙箱而不是共享容器。
 - `RENDER_RETAIN_SECONDS` 控制 run 结束后事件在 Redis 里的保留时间。
+
+多 worker 时所有进程必须连接同一个 Redis 和同一个 PostgreSQL；`SECRET_KEY` 也必须一致，否则加密配置、分享链接和验证码摘要会互相读不出来。
 
 ## 对象存储
 
@@ -38,7 +42,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 | 变量 | 说明 |
 | --- | --- |
 | `S3_ENDPOINT_URL` | 后端访问地址。Compose 里填 `http://rustfs:9000`；OSS 填地域 endpoint。 |
-| `S3_PUBLIC_ENDPOINT_URL` | 浏览器访问地址。HTTPS 站点必须填 HTTPS，否则图片会被混合内容拦截。 |
+| `S3_PUBLIC_ENDPOINT_URL` | 浏览器和沙箱访问地址。启用沙箱时必须能被沙箱访问（`load_files` 由沙箱 curl 该地址）；HTTPS 站点必须填 HTTPS，否则图片会被混合内容拦截。 |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | 访问凭证。 |
 | `S3_ADDRESSING_STYLE` | MinIO / RustFS 用 `path`，OSS 用 `virtual`。 |
 | `S3_PREFIX` | 对象 key 根前缀。 |

@@ -191,14 +191,21 @@ class _FakeFormats:
 
 
 class _FakeCommands:
+    def __init__(self, exit_code: int = 0) -> None:
+        self.exit_code = exit_code
+        self.calls: list[dict[str, Any]] = []
+
     async def run(self, command: str, cwd: str | None = None, timeout: float = 60) -> Any:  # noqa: ASYNC109
-        return SimpleNamespace(exit_code=0, stdout="did run", stderr="")
+        self.calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+        return SimpleNamespace(exit_code=self.exit_code, stdout="did run", stderr="")
 
 
 class _FakeSandbox:
     sandbox_id = "sbx-fake-1"
-    files = _FakeFormats()
-    commands = _FakeCommands()
+
+    def __init__(self) -> None:
+        self.files = _FakeFormats()
+        self.commands = _FakeCommands()
 
     async def beta_pause(self) -> None:
         self.paused = True
@@ -207,15 +214,22 @@ class _FakeSandbox:
         self.killed = True
 
 
-def _record(db_session: AsyncSession, name: str, body: bytes) -> FileRecord:
+def _record(
+    db_session: AsyncSession,
+    name: str,
+    body: bytes,
+    *,
+    owner_id: uuid.UUID | None = None,
+) -> FileRecord:
     digest = uuid.uuid4().hex + uuid.uuid4().hex
     db_session.add(Blob(hash_id=digest, size=len(body), storage_key=f"blobs/{uuid.uuid4().hex}"))
-    record = FileRecord(name=name, blob_hash=digest, content_type="text/plain")
+    record = FileRecord(name=name, blob_hash=digest, content_type="text/plain", owner_id=owner_id)
     db_session.add(record)
     return record
 
 
-async def test_sandbox_resolve_keys_pushes_bytes(db_session: AsyncSession) -> None:
+async def test_sandbox_resolve_keys_downloads_signed_url(db_session: AsyncSession) -> None:
+    """大文件不让后端推 envd，改由沙箱 curl 对象存储签名 URL。"""
     body = "文件内容".encode()
     record = _record(db_session, "说明.txt", body)
     await db_session.commit()
@@ -226,28 +240,72 @@ async def test_sandbox_resolve_keys_pushes_bytes(db_session: AsyncSession) -> No
     await storage.put(blob.storage_key, body, None)
 
     sandbox = _FakeSandbox()
-    sandbox.files = _FakeFormats()
     ws = SandboxWorkspace(storage, uuid.uuid4(), "run-3", sandbox)
     entries = await ws.resolve_keys(db_session, [str(record.id), "not-a-uuid"])
 
     assert entries[0]["saved_as"] == "说明.txt"
     assert entries[0]["size"] == len(body)
-    assert sandbox.files.written[f"{ws.root}/说明.txt"] == body
+    assert sandbox.files.written == {}
+    assert len(sandbox.commands.calls) == 1
+    call = sandbox.commands.calls[0]
+    assert "curl " in call["command"]
+    assert "https://s3.test/" in call["command"]
+    assert f"{ws.root}/说明.txt" in call["command"]
+    assert call["cwd"] == ws.root
     assert "error" in entries[1]
 
 
 async def test_sandbox_resolve_keys_reports_download_failure(db_session: AsyncSession) -> None:
-    body = b"gone"
-    record = _record(db_session, "missing.txt", body)
+    record = _record(db_session, "missing.txt", b"gone")
     await db_session.commit()
 
     sandbox = _FakeSandbox()
-    sandbox.files = _FakeFormats()
+    sandbox.commands = _FakeCommands(exit_code=1)
     ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-4", sandbox)
     entries = await ws.resolve_keys(db_session, [str(record.id)])
 
     assert "下载到沙箱失败" in entries[0]["error"]
     assert sandbox.files.written == {}
+
+
+class _LoopbackStorage(FakeStorage):
+    async def url_for(
+        self,
+        key: str,
+        *,
+        download_name: str | None = None,
+        inline: bool = False,
+        content_type: str | None = None,
+        ttl_seconds: int | None = None,
+    ) -> str:
+        return f"http://127.0.0.1:9000/{key}"
+
+
+async def test_sandbox_resolve_keys_rejects_loopback_storage(
+    db_session: AsyncSession,
+) -> None:
+    """本机对象存储沙箱访问不到，提前提示配置公网地址，不去跑一次必失败的下载。"""
+    record = _record(db_session, "x.txt", b"x")
+    await db_session.commit()
+
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(_LoopbackStorage(), uuid.uuid4(), "run-loop", sandbox)
+    entries = await ws.resolve_keys(db_session, [str(record.id)])
+
+    assert "S3_PUBLIC_ENDPOINT_URL" in entries[0]["error"]
+    assert sandbox.commands.calls == []
+
+
+async def test_sandbox_resolve_keys_rejects_other_owner(db_session: AsyncSession) -> None:
+    record = _record(db_session, "private.txt", b"secret", owner_id=uuid.uuid4())
+    await db_session.commit()
+
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-owner", sandbox)
+    entries = await ws.resolve_keys(db_session, [str(record.id)], owner_id=uuid.uuid4())
+
+    assert entries[0]["error"] == "文件不存在或已被删除"
+    assert sandbox.commands.calls == []
 
 
 async def test_sandbox_workspace_write_read() -> None:

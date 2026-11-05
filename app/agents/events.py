@@ -61,11 +61,22 @@ class CompactionResultEvent(CustomEvent):
 
 
 @dataclass(kw_only=True)
+class ImageGeneratedEvent(CustomEvent):
+    """出图工具每上传完一张发一次；turn 落 ImageItem，前端直接渲染。"""
+
+    storage_key: str
+    file_name: str
+    media_type: str
+    size: int = 0
+    alt: str | None = None
+
+
+@dataclass(kw_only=True)
 class ArtifactEvent(CustomEvent):
-    """一张生成好的产物。
+    """工作区发布的产物。
 
     入库和推送分开：Item 决定它在 run.content 里的位置（回放与分支都靠它），
-    这个事件只负责让前端在流式阶段立刻把图渲染出来，不用等 run 结束。
+    这个事件只负责让前端在流式阶段立刻把产物渲染出来，不用等 run 结束。
     """
 
     media: list[dict[str, Any]]

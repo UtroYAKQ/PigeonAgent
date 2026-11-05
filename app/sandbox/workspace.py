@@ -11,14 +11,16 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
+import shlex
 import shutil
 import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from app.core.config import Settings
-from app.infra.file_records import resolve_resources
+from app.infra.file_records import resolve_owned_resources
 from app.infra.storage import ObjectStorage, safe_name
 from app.models.blob import Blob
 from app.models.file_record import FileRecord
@@ -35,8 +37,28 @@ _MAX_LOAD_BATCH = 10
 _MAX_LIST_ENTRIES = 500
 _MAX_COMMAND_OUTPUT = 16_000
 _DEFAULT_FILES_DIR = "/home/user/pigeon"
+# 大文件不再从后端进程推给 envd（阿里云 FC 网关下 Python 传输层会卡到超时），
+# 改由沙箱直接从对象存储的短时效签名 URL 拉取。
+_DOWNLOAD_TIMEOUT_SECONDS = 180
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 logger = logging.getLogger(__name__)
+
+
+def _download_command(url: str, target: str) -> str:
+    return (
+        "curl -fsSL --retry 2 --retry-delay 1 --connect-timeout 10 --max-time 120 "
+        f"-o {shlex.quote(target)} {shlex.quote(url)}"
+    )
+
+
+def _is_loopback_url(url: str) -> bool:
+    """对象存储只配了本机地址时沙箱必然下载不到，提前给出可执行的配置提示。"""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return True
+    return host in _LOOPBACK_HOSTS
 
 
 class WorkspaceError(Exception):
@@ -160,11 +182,7 @@ async def _materialize_load_batch(
     两种工作区只有「字节落到哪」不同（本地写目录 / 沙箱推远端），其余逐字一致，
     差异收进 persist 回调；persist 返回这一条 key 的成功或失败条目。
     """
-    resolved = {
-        record_id: record
-        for record_id, record in (await resolve_resources(db, keys)).items()
-        if record.owner_id == owner_id
-    }
+    resolved = await resolve_owned_resources(db, keys, owner_id=owner_id)
     entries: list[dict[str, Any]] = []
     for key in keys[:_MAX_LOAD_BATCH]:
         key = key.strip()
@@ -363,18 +381,55 @@ class SandboxWorkspace(RunWorkspace):
 
         async def persist(key: str, record: FileRecord, blob: Blob) -> dict[str, Any]:
             name = safe_name(record.name)
-            # 沙箱不一定连得上对象存储（本地 MinIO / 内网端点），字节走后端中转
             try:
-                data = await self.storage.get(blob.storage_key)
-                await sandbox.files.write(self._abs(name), data)
+                url = await self.storage.url_for(
+                    blob.storage_key,
+                    download_name=name,
+                    content_type=record.content_type,
+                )
+            except Exception as exc:
+                logger.exception("Sandbox signed URL failed for %s in run %s", key, self.run_id)
+                return {
+                    "storage_key": key,
+                    "error": f"生成下载链接失败：{exc.__class__.__name__}",
+                }
+            if _is_loopback_url(url):
+                return {
+                    "storage_key": key,
+                    "error": (
+                        "对象存储只配置了本机地址，沙箱无法下载；"
+                        "请把 S3_PUBLIC_ENDPOINT_URL 配成沙箱可达的地址，或改用本地工作区"
+                    ),
+                }
+            target = self._abs(name)
+            try:
+                result = await sandbox.commands.run(
+                    _download_command(url, target),
+                    cwd=self.root,
+                    timeout=_DOWNLOAD_TIMEOUT_SECONDS,
+                )
             except Exception as exc:
                 logger.exception("Sandbox download failed for %s in run %s", key, self.run_id)
-                return {"storage_key": key, "error": f"下载到沙箱失败：{exc}"[:300]}
+                return {
+                    "storage_key": key,
+                    "error": f"下载到沙箱失败：{exc.__class__.__name__}",
+                }
+            if result.exit_code != 0:
+                logger.warning(
+                    "Sandbox download failed for %s in run %s (exit %s)",
+                    key,
+                    self.run_id,
+                    result.exit_code,
+                )
+                return {
+                    "storage_key": key,
+                    "error": f"下载到沙箱失败（curl 退出码 {result.exit_code}）",
+                }
             return {
                 "storage_key": key,
                 "original_name": record.name,
                 "saved_as": name,
-                "size": len(data),
+                "size": blob.size,
             }
 
         return await _materialize_load_batch(db, keys, owner_id, persist)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -17,8 +18,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # 活跃 run 标记的兜底 TTL：正常路径 close 时会显式删除；
-# 进程硬崩后靠它自动解除互斥，不必等人工清理
-ACTIVE_RUN_TTL_SECONDS = 3_600
+# 进程硬崩后靠它自动解除互斥，不必等人工清理。
+# 与 run 租约同量级，并由 execute_run 的心跳续期；worker 崩溃后不会被锁住一小时。
+ACTIVE_RUN_TTL_SECONDS = 600
+# 心跳里的 Redis 操作不能无限等，否则会卡住后续租约续期
+TOUCH_TIMEOUT_SECONDS = 2.0
 
 
 class RenderHub:
@@ -124,6 +128,34 @@ class RenderHub:
         if _as_text(current) == run_id:
             await self._redis.delete(active_key)
         await self._redis.delete(self._key(f"owner:{run_id}"))
+
+    async def touch(self, session_id: UUID, run_id: str) -> None:
+        """长工具调用期间续期 active/owner 标记；没有事件也能保住互斥。"""
+        if self._redis is None:
+            return
+        async with asyncio.timeout(TOUCH_TIMEOUT_SECONDS):
+            active_key = self._key(f"active:{session_id}")
+            active = _as_text(await self._redis.get(active_key))
+            if active is not None and active != run_id:
+                return
+            async with self._redis.pipeline(transaction=False) as pipe:
+                # active 匹配（或 Redis 重启后丢失）时把两个键补/续上；
+                # active 丢失时用 NX，避免和刚抢到会话的新 run 互相覆盖。
+                pipe.set(
+                    self._key(f"owner:{run_id}"),
+                    str(session_id),
+                    ex=ACTIVE_RUN_TTL_SECONDS,
+                )
+                if active is None:
+                    pipe.set(
+                        active_key,
+                        run_id,
+                        nx=True,
+                        ex=ACTIVE_RUN_TTL_SECONDS,
+                    )
+                else:
+                    pipe.expire(active_key, ACTIVE_RUN_TTL_SECONDS)
+                await pipe.execute()
 
     async def aclose(self) -> None:
         if self._redis is not None:

@@ -26,7 +26,7 @@ from app.core.exceptions import (
     UnprocessableError,
 )
 from app.domain.run_items import ImageItem, ResourceItem, RunItem, VideoItem
-from app.infra.file_records import resolve_resources
+from app.infra.file_records import is_owner_visible, resolve_resources
 from app.infra.storage import ObjectStorage, get_storage, safe_name, upload_key
 from app.models.blob import Blob
 from app.models.file_record import FileRecord
@@ -35,11 +35,6 @@ from app.schemas.file import FilePrepare, FilePrepareOut, FileRead
 from app.schemas.run import Attachment, ResourceRef
 
 logger = logging.getLogger(__name__)
-
-
-def _matches_owner(owner_id: uuid.UUID | None, user: uuid.UUID | None) -> bool:
-    """文件只对上传者本人可见；孤儿记录（owner 为空）也只有内部 owner=None 能碰。"""
-    return owner_id == user
 
 
 def _hash_hex(data: bytes) -> str:
@@ -272,7 +267,7 @@ async def resource_items_for(
             record = resolved.get(uuid.UUID(ref.storage_key))
         except ValueError:
             record = None
-        if record is None or not _matches_owner(record.owner_id, owner):
+        if record is None or not is_owner_visible(record.owner_id, owner):
             raise UnprocessableError(f"文件 {ref.storage_key} 不存在或已被删除")
         blob = blobs.get(record.blob_hash)
         media_type = record.content_type or "application/octet-stream"
@@ -317,7 +312,7 @@ async def resolve_attachments(
             record = resolved.get(uuid.UUID(attachment.file_id))
         except ValueError:
             record = None
-        if record is None or not _matches_owner(record.owner_id, owner):
+        if record is None or not is_owner_visible(record.owner_id, owner):
             raise UnprocessableError(f"附件 {attachment.file_id} 不存在或已被删除")
         media_type = record.content_type or attachment.media_type
         if media_type.startswith("image/"):
@@ -459,13 +454,13 @@ async def _owned_session(
 ) -> UploadSession:
     session = await db.get(UploadSession, upload_id)
     # 归属不符同样 404：不把别人会话的存在性泄露出来
-    if session is None or not _matches_owner(session.owner_id, owner):
+    if session is None or not is_owner_visible(session.owner_id, owner):
         raise NotFoundError("上传会话不存在或已失效")
     return session
 
 
 async def _owned_file(db: AsyncSession, owner: uuid.UUID | None, file_id: uuid.UUID) -> FileRecord:
     file = await db.get(FileRecord, file_id)
-    if file is None or not _matches_owner(file.owner_id, owner) or file.deleted_at is not None:
+    if file is None or not is_owner_visible(file.owner_id, owner) or file.deleted_at is not None:
         raise NotFoundError("文件不存在")
     return file

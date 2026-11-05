@@ -1,7 +1,7 @@
-"""图片生成工具：调用图片模型出图，每张立刻落库并推给前端。
+"""图片生成工具：调用图片模型出图并上传对象存储，返回每张图的存储标识。
 
-和联网搜索一样是普通 function tool，区别在于它有两个副作用：
-把图片写成 FileRecord（前端按 file_id 取字节），以及往 run 里追加 ImageItem。
+工具不写 run content：每上传完一张就发 ImageGeneratedEvent，由 turn 落成 ImageItem；
+模型要读取生成结果时，把返回的 storage_key 交给 load_files 加载到工作区。
 """
 
 from __future__ import annotations
@@ -11,12 +11,11 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 from uuid import UUID, uuid4
 
+from pydantic_ai import RunContext
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.events import ArtifactEvent
-from app.agents.store import SessionStore
+from app.agents.events import ImageGeneratedEvent
 from app.core.config import Settings
-from app.domain.run_items import ImageItem
 from app.infra.image_factory import ImageGenerationError, create_client
 from app.infra.storage import get_storage
 from app.services import billing, file_service
@@ -28,21 +27,22 @@ GenerateImageTool = Callable[..., Coroutine[Any, Any, dict[str, Any]]]
 
 
 def make_generate_image(
-    store: SessionStore,
     session_factory: async_sessionmaker[AsyncSession],
     *,
     owner_id: UUID | None,
     settings: Settings,
+    run_id: Callable[[], UUID | None],
     image_model_id: int | None = None,
 ) -> GenerateImageTool:
     """闭包捕获运行期依赖；工具签名只有模型看得懂的参数。"""
 
     async def generate_image(
+        ctx: RunContext[Any],
         prompt: str,
         count: int = 1,
         size: str | None = None,
     ) -> dict[str, Any]:
-        """根据文字描述生成图片，生成结果会直接展示给用户。
+        """根据文字描述生成图片，返回每张图的云端存储标识；结果会直接展示给用户。
 
         Args:
             prompt: 画面描述，尽量具体：主体、构图、光线、色调、风格。
@@ -86,27 +86,27 @@ def make_generate_image(
                     image.media_type,
                     image.data,
                 )
-            item = ImageItem(
-                role="assistant",
-                file_id=str(file.id),
-                media_type=image.media_type,
-                alt=alt,
-                # 图片字节不进模型上下文：模型已经知道生成结果了
-                in_context=False,
+            storage_key = str(file.id)
+            size_bytes = len(image.data)
+            saved.append(
+                {
+                    "storage_key": storage_key,
+                    "name": name,
+                    "media_type": image.media_type,
+                    "size": size_bytes,
+                    "alt": alt,
+                }
             )
-            await store.append_items([item])
-            # 逐张落库，取消或失败时已出的图不会丢
-            await store.flush()
-            payload = {
-                "file_id": str(file.id),
-                "media_type": image.media_type,
-                "name": name,
-                "size": len(image.data),
-                "alt": alt,
-                "origin": "generated",
-            }
-            saved.append(payload)
-            store.emit(ArtifactEvent(media=[payload]))
+            # 逐张通知 turn 落库并推给前端；工具本身不碰 run content
+            await ctx.emit(
+                ImageGeneratedEvent(
+                    storage_key=storage_key,
+                    file_name=name,
+                    media_type=image.media_type,
+                    size=size_bytes,
+                    alt=alt,
+                )
+            )
 
         if owner_id is not None and saved:
             # 出图成功才扣；失败分支上游根本没给字节
@@ -118,7 +118,7 @@ def make_generate_image(
                         user_id=owner_id,
                         model=record,
                         count=len(saved),
-                        run_id=store.run_uuid,
+                        run_id=run_id(),
                     )
             except Exception:
                 logger.exception("Image billing failed for %s images", len(saved))
@@ -127,7 +127,11 @@ def make_generate_image(
             "count": len(saved),
             "model": record.name,
             "size": chosen,
-            "note": "图片已经展示给用户，回复里不用再重复描述画面细节。",
+            "images": saved,
+            "note": (
+                "图片已经展示给用户，回复里不用再重复描述画面细节；"
+                "需要读取图片内容时，用 load_files 把 storage_key 加载到工作区。"
+            ),
         }
         if size_note:
             result["size_note"] = size_note

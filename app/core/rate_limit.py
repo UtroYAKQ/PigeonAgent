@@ -10,6 +10,8 @@ dict（本地开发与当前的单 worker 部署）。
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -17,6 +19,10 @@ from dataclasses import dataclass
 from redis.asyncio import Redis
 
 from app.core.exceptions import TooManyRequestsError
+
+logger = logging.getLogger(__name__)
+
+_REDIS_TIMEOUT_SECONDS = 2.0
 
 # 进程内计数表的上限：防的是"拿随机邮箱刷注册"把内存顶爆
 _MAX_WINDOWS = 10_000
@@ -65,19 +71,26 @@ class RateLimiter:
     async def _redis_retry_after(
         self, redis: Redis, key: str, limit: int, window_seconds: float
     ) -> int:
-        window = max(1, math.ceil(window_seconds))
-        name = self._key(key)
-        count = int(await redis.incr(name))
-        if count == 1:
-            await redis.expire(name, window)
-        if count > limit:
-            remaining = int(await redis.ttl(name))
-            if remaining < 0:
-                # 只在 incr 与 expire 之间被硬杀才会没有 TTL；当场补上，别留一个死键
-                await redis.expire(name, window)
-                remaining = window
-            return max(1, remaining)
-        return 0
+        try:
+            async with asyncio.timeout(_REDIS_TIMEOUT_SECONDS):
+                window = max(1, math.ceil(window_seconds))
+                name = self._key(key)
+                count = int(await redis.incr(name))
+                if count == 1:
+                    await redis.expire(name, window)
+                if count > limit:
+                    remaining = int(await redis.ttl(name))
+                    if remaining < 0:
+                        # 只在 incr 与 expire 之间被硬杀才会没有 TTL；当场补上，别留一个死键
+                        await redis.expire(name, window)
+                        remaining = window
+                    return max(1, remaining)
+                return 0
+        except Exception as exc:
+            # Redis 挂了不应该让登录/注册一起挂；退回进程内窗口，至少保留单 worker 的限流。
+            # 这里用 warning 不带堆栈：认证请求量大时避免刷爆日志。
+            logger.warning("Rate limiter Redis backend failed; using process-local window: %s", exc)
+            return self._local_retry_after(key, limit, window_seconds)
 
     def _key(self, suffix: str) -> str:
         return f"{self._prefix}:ratelimit:{suffix}"

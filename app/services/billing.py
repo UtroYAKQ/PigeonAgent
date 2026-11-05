@@ -206,6 +206,27 @@ async def adjust(
     return delta
 
 
+@dataclass(frozen=True, slots=True)
+class RunChargeTotals:
+    credits: float
+    images: int
+
+
+async def run_charge_totals(db: AsyncSession, run_id: UUID) -> RunChargeTotals:
+    """一条 run 的实际扣费和出图张数；口径只在这里解释，日志侧直接消费。"""
+    deltas = await db.scalars(
+        select(CreditLedger.delta).where(CreditLedger.run_id == run_id, CreditLedger.delta < 0)
+    )
+    credits = round(-sum(float(delta) for delta in deltas), 6)
+    usages = await db.scalars(
+        select(CreditLedger.usage).where(
+            CreditLedger.run_id == run_id, CreditLedger.reason == IMAGE
+        )
+    )
+    images = sum(int(raw.get("images") or 0) for raw in usages if isinstance(raw, dict))
+    return RunChargeTotals(credits=credits, images=images)
+
+
 async def _billed_usage(db: AsyncSession, run_id: UUID) -> TokenUsage:
     """该 run 已结算过的用量水位 = 所有 chat 流水的 usage 之和。"""
     rows = await db.scalars(

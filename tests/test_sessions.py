@@ -190,12 +190,20 @@ async def test_get_missing_session_returns_404(client: AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_delete_session_cascades_runs(client: AsyncClient, db_session: AsyncSession) -> None:
-    created = await create_session(client)
+async def test_delete_session_cascades_runs_and_workspace(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     from uuid import UUID
 
+    from app.core.config import Settings
+    from app.sandbox.workspace import local_workspace_root
+
+    created = await create_session(client)
     session_id = UUID(created["id"])
     run = await append_user_run(db_session, session_id, "会被级联删除")
+    workspace = local_workspace_root(Settings(_env_file=None), session_id)
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "leftover.txt").write_text("x", encoding="utf-8")
 
     response = await client.delete(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 204
@@ -205,3 +213,4 @@ async def test_delete_session_cascades_runs(client: AsyncClient, db_session: Asy
 
     remaining = await db_session.scalars(select(SessionRun).where(SessionRun.id == run.id))
     assert list(remaining) == []
+    assert not workspace.exists()

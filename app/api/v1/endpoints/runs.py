@@ -104,7 +104,7 @@ async def cancel_run(
 ) -> None:
     # 会话不属于调用者就当不存在，顺手防掉跨用户取消探测
     await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    registry.cancel_run(session_id, run_id)
+    await registry.cancel_run(session_id, run_id)
 
 
 @router.get("/{session_id}/runs/{run_id}/events")

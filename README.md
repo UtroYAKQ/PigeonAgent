@@ -16,7 +16,13 @@
   <a href="CONTRIBUTING.md">贡献</a>
 </p>
 
-![PigeonAgent 对话工作台](docs/assets/chat-home.png)
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="PigeonAgent 演示：对话、HTML 预览与用量" width="100%" />
+</p>
+
+<p align="center">
+  <sub>演示：发送消息 → 流式回复 → HTML 预览 → 用量统计；<a href="docs/assets/demo.webm">观看完整视频（WebM，约 19 秒）</a></sub>
+</p>
 
 ## 功能
 
@@ -25,7 +31,7 @@
 - **对话树**：重新生成、编辑提问、版本切换；分支之间互不覆盖，用量按实际消耗累计。
 - **文件与媒体**：图片、视频、文档上传；对象存储直链由服务端签名，浏览器直接取字节；HTML 预览在右侧独立面板打开。
 - **模型管理**：对话模型与图片模型分开维护；按模型配置思考挡位、上下文窗口和工具能力；输入框可直接切换图片模型。
-- **平台能力**：用户与会话管理、操作日志、积分与用量、分享链接、邮箱验证、Redis 多 worker、S3 兼容存储（RustFS / MinIO / OSS / AWS S3）。
+- **平台能力**：用户与会话管理、操作日志、积分与用量、分享链接、邮箱验证、Redis 多 worker（事件流、跨 worker 取消、沙箱复用）、S3 兼容存储（RustFS / MinIO / OSS / AWS S3）。
 - **Agent 能力**：联网搜索、e2b 兼容沙箱、本地文件工作区、上下文自动压缩、提示词评测工具。
 - **可观测性**：`/health`、`/ready`、请求 ID、异步操作日志、管理员审计日志。
 
@@ -88,7 +94,7 @@ S3_ENDPOINT_URL=http://rustfs:9000
 S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
 ```
 
-> `POSTGRES_PASSWORD` 与 `DATABASE_URL` 里的密码要保持一致。S3 的 `S3_ENDPOINT_URL` 给后端容器用服务名 `rustfs`；`S3_PUBLIC_ENDPOINT_URL` 是浏览器能访问到的地址。
+> `POSTGRES_PASSWORD` 与 `DATABASE_URL` 里的密码要保持一致。S3 的 `S3_ENDPOINT_URL` 给后端容器用服务名 `rustfs`；`S3_PUBLIC_ENDPOINT_URL` 是浏览器和沙箱都能访问到的地址。
 
 启动：
 
@@ -204,4 +210,4 @@ CI 会分别跑后端（SQLite）与 PostgreSQL 两套测试，以及前端 lint
 
 ## 许可证
 
-[MIT](LICENSE)
+[MIT](LICENSE)。前端分发的第三方组件与许可证文本见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

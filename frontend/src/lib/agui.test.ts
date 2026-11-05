@@ -35,6 +35,16 @@ const usage = {
   total_tokens: 30,
 }
 
+function generated(fileId: string) {
+  return {
+    storage_key: fileId,
+    file_name: `${fileId}.png`,
+    media_type: 'image/png',
+    size: 1024,
+    alt: null,
+  }
+}
+
 function media(fileId: string): LiveMedia {
   return { file_id: fileId, media_type: 'image/png', name: `${fileId}.png`, size: 1024, alt: null }
 }
@@ -197,12 +207,29 @@ describe('applyAgUiEvent CUSTOM 事件', () => {
     expect(apply({ type: 'CUSTOM', name: 'run_usage', value: { usage } }).usage).toEqual(usage)
   })
 
-  it('artifact 建一个产物块', () => {
+  it('image_generated 建一个产物块', () => {
+    const live = apply({ type: 'CUSTOM', name: 'image_generated', value: generated('file-1') })
+    expect(blockOf(live, 'artifact-file-1')).toMatchObject({
+      kind: 'artifact',
+      media: [{ file_id: 'file-1', origin: 'generated' }],
+    })
+  })
+
+  it('连续到达的图片并进同一块，一次出多张就是一张网格', () => {
+    const live = apply(
+      { type: 'CUSTOM', name: 'image_generated', value: generated('file-1') },
+      { type: 'CUSTOM', name: 'image_generated', value: generated('file-2') },
+    )
+    expect(live.blocks).toHaveLength(1)
+    expect(live.blocks[0]?.media?.map(item => item.file_id)).toEqual(['file-1', 'file-2'])
+  })
+
+  it('artifact 建一个工作区产物块', () => {
     const live = apply({ type: 'CUSTOM', name: 'artifact', value: { media: [media('file-1')] } })
     expect(blockOf(live, 'artifact-file-1')).toMatchObject({ kind: 'artifact' })
   })
 
-  it('连续到达的产物并进同一块，一次出多张就是一张网格', () => {
+  it('连续到达的工作区产物并进同一块', () => {
     const live = apply(
       { type: 'CUSTOM', name: 'artifact', value: { media: [media('file-1')] } },
       { type: 'CUSTOM', name: 'artifact', value: { media: [media('file-2')] } },
@@ -211,11 +238,11 @@ describe('applyAgUiEvent CUSTOM 事件', () => {
     expect(live.blocks[0]?.media?.map(item => item.file_id)).toEqual(['file-1', 'file-2'])
   })
 
-  it('空 media 的 artifact 不建块，正文块之后的产物另起一块', () => {
+  it('无效的产物事件不建块，正文块之后的产物另起一块', () => {
     const live = apply(
-      { type: 'CUSTOM', name: 'artifact', value: { media: [] } },
+      { type: 'CUSTOM', name: 'image_generated', value: {} },
       { type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg-1', delta: '文字' },
-      { type: 'CUSTOM', name: 'artifact', value: { media: [media('file-1')] } },
+      { type: 'CUSTOM', name: 'image_generated', value: generated('file-1') },
     )
     expect(live.blocks.map(item => item.kind)).toEqual(['text', 'artifact'])
   })
