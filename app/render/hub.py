@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # 活跃 run 标记的兜底 TTL：正常路径 close 时会显式删除；
 # 进程硬崩后靠它自动解除互斥，不必等人工清理
 ACTIVE_RUN_TTL_SECONDS = 3_600
+CANCEL_REQUEST_TTL_SECONDS = 3_600
 
 
 class RenderHub:
@@ -43,6 +44,10 @@ class RenderHub:
         self._queues: dict[str, RenderStream] = {}
         self._active: dict[UUID, str] = {}
         self._owners: dict[str, UUID] = {}
+
+    @property
+    def distributed(self) -> bool:
+        return self._redis is not None
 
     async def create(self, session_id: UUID, run_id: str) -> RenderProducer:
         if self._redis is None:
@@ -123,7 +128,44 @@ class RenderHub:
         current = await self._redis.get(active_key)
         if _as_text(current) == run_id:
             await self._redis.delete(active_key)
-        await self._redis.delete(self._key(f"owner:{run_id}"))
+        await self._redis.delete(
+            self._key(f"owner:{run_id}"),
+            self._key(f"cancel:{run_id}"),
+        )
+
+    async def renew(self, session_id: UUID, run_id: str) -> bool:
+        """只给仍属于本 run 的 Redis 元数据续租，防止旧 worker 刷新新 run。"""
+        if self._redis is None:
+            return self._active.get(session_id) == run_id and self._owners.get(run_id) == session_id
+        owner_key = self._key(f"owner:{run_id}")
+        active_key = self._key(f"active:{session_id}")
+        owner, active = await self._redis.mget(owner_key, active_key)
+        if _as_text(owner) != str(session_id) or _as_text(active) != run_id:
+            return False
+        pipe = self._redis.pipeline(transaction=True)
+        pipe.expire(owner_key, ACTIVE_RUN_TTL_SECONDS)
+        pipe.expire(active_key, ACTIVE_RUN_TTL_SECONDS)
+        await pipe.execute()
+        return True
+
+    async def request_cancel(self, session_id: UUID, run_id: str) -> None:
+        """写入可被任意 worker 消费的取消请求；TTL 防止进程崩溃后留下脏键。"""
+        if self._redis is None:
+            raise NotFoundError(f"Run {run_id} is not active")
+        owner = await self._redis.get(self._key(f"owner:{run_id}"))
+        if _as_text(owner) != str(session_id):
+            raise NotFoundError(f"Run {run_id} is not active")
+        await self._redis.set(
+            self._key(f"cancel:{run_id}"),
+            str(session_id),
+            ex=CANCEL_REQUEST_TTL_SECONDS,
+        )
+
+    async def cancellation_requested(self, session_id: UUID, run_id: str) -> bool:
+        if self._redis is None:
+            return False
+        requested = await self._redis.get(self._key(f"cancel:{run_id}"))
+        return _as_text(requested) == str(session_id)
 
     async def aclose(self) -> None:
         if self._redis is not None:

@@ -4,6 +4,7 @@ import base64
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from app.infra import image_factory
@@ -101,3 +102,76 @@ async def test_upstream_error_does_not_leak_the_key(monkeypatch: pytest.MonkeyPa
 
     assert "sk-live0123456789ab" not in str(captured.value)
     assert "upstream rejected" in str(captured.value)
+
+
+async def test_generated_image_url_rejects_private_addresses() -> None:
+    with pytest.raises(ValueError, match="non-public"):
+        await image_factory._validate_remote_url("http://127.0.0.1/internal.png")
+    with pytest.raises(ValueError, match="credentials"):
+        await image_factory._validate_remote_url("https://user:pass@example.com/image.png")
+
+
+async def test_generated_image_download_is_size_limited(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def allow_url(url: str) -> image_factory._RemoteTarget:
+        return image_factory._RemoteTarget(url, "images.example", "images.example")
+
+    monkeypatch.setattr(image_factory, "_validate_remote_url", allow_url)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "image/png"},
+            content=b"x" * (image_factory.MAX_IMAGE_DOWNLOAD_BYTES + 1),
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError, match="too large"):
+            await image_factory._download_remote_image(client, "https://images.example/test.png")
+
+
+async def test_generated_image_redirect_is_revalidated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked: list[str] = []
+
+    async def validate(url: str) -> image_factory._RemoteTarget:
+        checked.append(url)
+        if "127.0.0.1" in url:
+            raise ValueError("non-public")
+        return image_factory._RemoteTarget(url, "images.example", "images.example")
+
+    monkeypatch.setattr(image_factory, "_validate_remote_url", validate)
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            302,
+            headers={"location": "http://127.0.0.1/internal.png"},
+            request=request,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError, match="non-public"):
+            await image_factory._download_remote_image(client, "https://images.example/test.png")
+    assert checked == [
+        "https://images.example/test.png",
+        "http://127.0.0.1/internal.png",
+    ]
+
+
+async def test_generated_image_connection_is_pinned_to_validated_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def resolve(*_args: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        return [(2, 1, 6, "", ("93.184.216.34", 443))]
+
+    monkeypatch.setattr(image_factory.socket, "getaddrinfo", resolve)
+    target = await image_factory._validate_remote_url(
+        "https://images.example:8443/path/image.png?token=abc"
+    )
+
+    assert target.request_url == "https://93.184.216.34:8443/path/image.png?token=abc"
+    assert target.host_header == "images.example:8443"
+    assert target.sni_hostname == "images.example"

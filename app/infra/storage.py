@@ -73,7 +73,7 @@ class ObjectStorage(Protocol):
         ttl_seconds: int | None = None,
     ) -> str: ...
 
-    async def presign_put(self, key: str) -> str: ...
+    async def presign_put(self, key: str, *, content_length: int) -> str: ...
 
 
 def _build_client(settings: Settings, *, endpoint_url: str | None = None) -> S3Client:
@@ -206,10 +206,12 @@ class S3Storage:
             ttl_seconds=ttl_seconds,
         )
 
-    async def presign_put(self, key: str) -> str:
-        """给客户端直达上传区的 PUT 签名；该 key 只能放，读走应用鉴权。"""
+    async def presign_put(self, key: str, *, content_length: int) -> str:
+        """给客户端直达上传区的 PUT 签名，并把声明大小纳入签名约束。"""
         return self._presign_client.generate_presigned_url(
-            "put_object", Params={"Bucket": self.bucket, "Key": key}, ExpiresIn=self.ttl_seconds
+            "put_object",
+            Params={"Bucket": self.bucket, "Key": key, "ContentLength": content_length},
+            ExpiresIn=self.ttl_seconds,
         )
 
 

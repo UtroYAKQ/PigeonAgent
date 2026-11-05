@@ -6,9 +6,13 @@ LiteLLM 负责协议差异（请求形状、返回 b64 还是 url、错误类型
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import ipaddress
 import logging
+import socket
 from dataclasses import dataclass
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 import litellm
@@ -25,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 # 出图普遍比对话慢，留足上游排队时间
 GENERATION_TIMEOUT_SECONDS = 180.0
+MAX_IMAGE_DOWNLOAD_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_REDIRECTS = 5
 # 没有 key 的内网网关也要求带一个非空值
 _PLACEHOLDER_KEY = "sk-no-key"
 
@@ -46,6 +52,13 @@ class _Target:
     api_base: str
     api_key: str
     quality: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _RemoteTarget:
+    request_url: str
+    host_header: str
+    sni_hostname: str
 
 
 def _resolve_api_key(record: ImageModel, settings: Settings) -> str | None:
@@ -138,15 +151,111 @@ async def _item_to_image(item: object, client: httpx.AsyncClient) -> GeneratedIm
     url = getattr(item, "url", None)
     if isinstance(url, str) and url:
         try:
-            response = await client.get(url)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
+            raw, media_type = await _download_remote_image(client, url)
+        except (httpx.HTTPError, ValueError) as exc:
             logger.warning("Download generated image failed: %s", exc.__class__.__name__)
             return None
-        media_type = response.headers.get("content-type", "image/png").split(";")[0].strip()
-        return GeneratedImage(response.content, media_type or "image/png", revised_prompt)
+        return GeneratedImage(raw, media_type, revised_prompt)
 
     return None
+
+
+async def _download_remote_image(client: httpx.AsyncClient, url: str) -> tuple[bytes, str]:
+    """逐跳校验供应商 URL，并在读取过程中执行硬字节上限。"""
+    current = url
+    for redirect_count in range(MAX_IMAGE_REDIRECTS + 1):
+        target = await _validate_remote_url(current)
+        async with client.stream(
+            "GET",
+            target.request_url,
+            follow_redirects=False,
+            headers={"Host": target.host_header},
+            extensions={"sni_hostname": target.sni_hostname},
+        ) as response:
+            if response.is_redirect:
+                if redirect_count >= MAX_IMAGE_REDIRECTS:
+                    raise ValueError("too many image redirects")
+                location = response.headers.get("location")
+                if not location:
+                    raise ValueError("image redirect has no location")
+                current = urljoin(current, location)
+                continue
+
+            response.raise_for_status()
+            declared = response.headers.get("content-length")
+            if declared is not None:
+                try:
+                    declared_size = int(declared)
+                except ValueError as exc:
+                    raise ValueError("invalid image content-length") from exc
+                if declared_size > MAX_IMAGE_DOWNLOAD_BYTES:
+                    raise ValueError("generated image is too large")
+
+            body = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(body) + len(chunk) > MAX_IMAGE_DOWNLOAD_BYTES:
+                    raise ValueError("generated image is too large")
+                body.extend(chunk)
+            media_type = response.headers.get("content-type", "image/png")
+            normalized = media_type.split(";", 1)[0].strip() or "image/png"
+            return bytes(body), normalized
+    raise ValueError("too many image redirects")
+
+
+async def _validate_remote_url(url: str) -> _RemoteTarget:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("generated image URL must use HTTP or HTTPS")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("generated image URL must not contain credentials")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("generated image URL has no host")
+    ascii_host = host.encode("idna").decode("ascii")
+
+    try:
+        addresses = [ipaddress.ip_address(ascii_host)]
+    except ValueError:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            results = await asyncio.to_thread(
+                socket.getaddrinfo, ascii_host, port, type=socket.SOCK_STREAM
+            )
+        except socket.gaierror as exc:
+            raise ValueError("generated image host cannot be resolved") from exc
+        addresses = list({ipaddress.ip_address(item[4][0]) for item in results})
+
+    if not addresses or any(not _is_public_address(address) for address in addresses):
+        raise ValueError("generated image URL resolves to a non-public address")
+    selected = sorted(addresses, key=lambda address: (address.version, address.packed))[0]
+    pinned_host = f"[{selected.compressed}]" if selected.version == 6 else selected.compressed
+    port_suffix = f":{parsed.port}" if parsed.port is not None else ""
+    request_url = urlunsplit(
+        (
+            parsed.scheme,
+            f"{pinned_host}{port_suffix}",
+            parsed.path or "/",
+            parsed.query,
+            "",
+        )
+    )
+    host_header = f"[{ascii_host}]" if ":" in ascii_host else ascii_host
+    return _RemoteTarget(
+        request_url=request_url,
+        host_header=f"{host_header}{port_suffix}",
+        sni_hostname=ascii_host,
+    )
+
+
+def _is_public_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return not (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    )
 
 
 def _sniff_media_type(data: bytes) -> str:

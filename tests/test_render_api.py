@@ -43,15 +43,25 @@ async def make_stream_session(db_session: AsyncSession, title: str = "sse") -> U
     return created.id
 
 
-async def test_sse_stream_frames_events(client: AsyncClient, db_session: AsyncSession) -> None:
+async def test_sse_stream_frames_events(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: Any
+) -> None:
     hub = get_hub()
     session_id = await make_stream_session(db_session)
     producer = await hub.create(session_id, "run-sse")
     await producer.publish(RunStartedEvent(thread_id="t", run_id="run-sse"))
+    subscribed = asyncio.Event()
+    original_subscribe = hub.subscribe
+
+    async def tracked_subscribe(*args: Any, **kwargs: Any) -> RenderConsumer | None:
+        consumer = await original_subscribe(*args, **kwargs)
+        subscribed.set()
+        return consumer
+
+    monkeypatch.setattr(hub, "subscribe", tracked_subscribe)
 
     request = asyncio.create_task(client.get(f"/api/v1/sessions/{session_id}/runs/run-sse/events"))
-    # 首个请求带首次鉴权/查库开销，等它真正订阅上再发事件
-    await asyncio.sleep(0.2)
+    await asyncio.wait_for(subscribed.wait(), timeout=2)
     await producer.publish(TextMessageContentEvent(message_id="m", delta="hello"))
     await producer.publish(RunFinishedEvent(thread_id="t", run_id="run-sse"))
     await producer.close()
@@ -126,16 +136,29 @@ async def test_stream_rejects_wrong_session(client: AsyncClient) -> None:
 
 
 async def test_two_sse_consumers_receive_same_stream(
-    client: AsyncClient, db_session: AsyncSession
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: Any
 ) -> None:
     hub = get_hub()
     session_id = await make_stream_session(db_session)
     producer = await hub.create(session_id, "run-multi")
     url = f"/api/v1/sessions/{session_id}/runs/run-multi/events"
+    subscribed = asyncio.Event()
+    subscription_count = 0
+    original_subscribe = hub.subscribe
+
+    async def tracked_subscribe(*args: Any, **kwargs: Any) -> RenderConsumer | None:
+        nonlocal subscription_count
+        consumer = await original_subscribe(*args, **kwargs)
+        subscription_count += 1
+        if subscription_count == 2:
+            subscribed.set()
+        return consumer
+
+    monkeypatch.setattr(hub, "subscribe", tracked_subscribe)
 
     first = asyncio.create_task(client.get(url))
     second = asyncio.create_task(client.get(url))
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(subscribed.wait(), timeout=2)
     await producer.publish(TextMessageContentEvent(message_id="m", delta="hello"))
     await producer.publish(RunFinishedEvent(thread_id="t", run_id="run-multi"))
     await producer.close()

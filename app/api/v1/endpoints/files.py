@@ -28,7 +28,6 @@ _SAFE_INLINE_TYPES = {
     "image/avif",
     "image/bmp",
     "image/x-icon",
-    "image/svg+xml",
     "video/mp4",
     "video/webm",
     "video/quicktime",
@@ -124,7 +123,7 @@ async def complete_upload(
 async def list_files(
     db: SessionDep,
     user: CurrentUserDep,
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> list[FileRead]:
     """我的文件（未软删的），新的在前。"""
     return await file_service.list_files(db, user.id, limit=limit)

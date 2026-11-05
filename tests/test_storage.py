@@ -166,17 +166,20 @@ async def test_presign_uses_the_public_endpoint(monkeypatch: pytest.MonkeyPatch)
 
     assert len(clients) == 2, "内网 client 和公网预签名 client 各一个"
     await storage.url_for("blobs/x")
-    await storage.presign_put("tmp/a")
+    await storage.presign_put("tmp/a", content_length=3)
     assert clients[1].calls, "取/传签名都应该走公网 client"
     assert not clients[0].calls, "内网 client 不负责预签名"
 
 
 async def test_presign_put_is_a_put_signature() -> None:
     client = FakeClient()
-    await S3Storage(settings(), client=client).presign_put("tmp/a")  # type: ignore[arg-type]
+    await S3Storage(settings(), client=client).presign_put(  # type: ignore[arg-type]
+        "tmp/a", content_length=123
+    )
     name, kwargs = client.calls[-1]
     assert name == "generate_presigned_url"
     assert kwargs["method"] == "put_object"
+    assert kwargs["Params"]["ContentLength"] == 123
 
 
 async def test_upstream_error_becomes_storage_error() -> None:

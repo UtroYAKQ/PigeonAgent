@@ -61,11 +61,16 @@ class RunRegistry:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    def cancel_run(self, session_id: UUID, run_id: str) -> None:
+    async def cancel_run(self, session_id: UUID, run_id: str, hub: RenderHub) -> None:
         cancellation = self.cancellations.get(run_id)
-        if cancellation is None or cancellation[0] != session_id:
+        if cancellation is not None and cancellation[0] != session_id:
             raise NotFoundError(f"Run {run_id} is not active")
-        cancellation[1].cancel()
+        if hub.distributed:
+            await hub.request_cancel(session_id, run_id)
+        elif cancellation is None:
+            raise NotFoundError(f"Run {run_id} is not active")
+        if cancellation is not None:
+            cancellation[1].cancel()
 
     async def cancel_all(self) -> None:
         tasks = list(self.tasks)
@@ -193,6 +198,7 @@ async def launch_run(
             thinking_level=thinking_level,
             cancellation_token=cancellation_token,
             registry=registry,
+            hub=hub,
             toolset=toolset,
             enable_web_search=enable_web_search,
             enable_image_generation=enable_image_generation,
@@ -216,6 +222,7 @@ async def execute_run(
     cancellation_token: CancellationToken | None = None,
     deferred_tool_results: DeferredToolResults | None = None,
     registry: RunRegistry | None = None,
+    hub: RenderHub | None = None,
     toolset: AbstractToolset[Any] | None = None,
     enable_web_search: bool = False,
     enable_image_generation: bool = True,
@@ -231,7 +238,12 @@ async def execute_run(
     wall_started = datetime.now(UTC)
     first_event_logged = False
     # 租约心跳：长工具调用期间不写 item，心跳保住租约，别的 resume 才抢不走
-    heartbeat = asyncio.create_task(_renew_lease_loop(session_factory, session_id, run_id))
+    heartbeat = asyncio.create_task(_renew_lease_loop(session_factory, session_id, run_id, hub=hub))
+    cancellation_watcher = (
+        asyncio.create_task(_watch_cancellation(hub, session_id, run_id, cancellation_token))
+        if hub is not None and hub.distributed and cancellation_token is not None
+        else None
+    )
     try:
         async with session_factory() as db:
             # 不支持工具的模型不需要工作区，避免白白建目录 / 启沙箱
@@ -339,6 +351,10 @@ async def execute_run(
         heartbeat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat
+        if cancellation_watcher is not None:
+            cancellation_watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancellation_watcher
         if registry is not None:
             registry.cancellations.pop(run_id, None)
         final_status = await _final_status(session_factory, session_id, run_uuid)
@@ -492,7 +508,13 @@ async def _shutdown_workspace(
             logger.exception("Sandbox shutdown failed for run %s", run_id)
 
 
-async def _renew_lease_loop(session_factory: SessionFactory, session_id: UUID, run_id: str) -> None:
+async def _renew_lease_loop(
+    session_factory: SessionFactory,
+    session_id: UUID,
+    run_id: str,
+    *,
+    hub: RenderHub | None = None,
+) -> None:
     """按租约三分之一周期续租，直到 finally 把它取消掉。
 
     单次续租失败只记日志、不退出：数据库抖一下就该继续试，
@@ -504,8 +526,24 @@ async def _renew_lease_loop(session_factory: SessionFactory, session_id: UUID, r
         try:
             async with session_factory() as db:
                 await run_store.renew_run_lease(db, session_id, run_id)
+            if hub is not None:
+                await hub.renew(session_id, run_id)
         except Exception:
             logger.exception("Lease renewal failed for run %s in session %s", run_id, session_id)
+
+
+async def _watch_cancellation(
+    hub: RenderHub,
+    session_id: UUID,
+    run_id: str,
+    cancellation_token: CancellationToken,
+) -> None:
+    """轮询持久取消键，避免 Pub/Sub 消息在 worker 重连时丢失。"""
+    while True:
+        if await hub.cancellation_requested(session_id, run_id):
+            cancellation_token.cancel()
+            return
+        await asyncio.sleep(0.25)
 
 
 async def _release_run_lease(
