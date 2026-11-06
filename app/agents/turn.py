@@ -70,6 +70,7 @@ from app.agents.events import (
 from app.agents.store import SessionStore
 from app.core.config import DEFAULT_COMPACTION_THRESHOLD
 from app.core.exceptions import CreditsExhausted
+from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY
 from app.domain.run_items import (
     ApprovalRequestItem,
     CallRequestItem,
@@ -339,8 +340,10 @@ class AgentTurn:
             [
                 ImageItem(
                     role="assistant",
-                    file_id=event.storage_key,
+                    file_id=event.file_id,
+                    name=event.file_name,
                     media_type=event.media_type,
+                    size=event.size,
                     alt=event.alt,
                     in_context=False,
                 )
@@ -354,7 +357,7 @@ class AgentTurn:
         items = [
             ResourceItem(
                 role="assistant",
-                storage_key=media.file_id,
+                file_id=media.file_id,
                 name=media.name,
                 media_type=media.media_type,
                 size=media.size,
@@ -371,7 +374,8 @@ class AgentTurn:
     async def _on_tool_result(self, event: ToolResultEvent) -> None:
         part = event.part
         # 有引用的媒体先剥原始二进制再建 item，避免先 base64 编码再丢弃
-        if codec.media_file_id(getattr(part, "metadata", None)):
+        metadata = getattr(part, "metadata", None)
+        if isinstance(metadata, dict) and metadata.get(TOOL_MEDIA_METADATA_KEY):
             part = replace(part, content=codec.without_binary_media(part.content))
         await self._store.append_items([codec.tool_result_item(part)])
 
@@ -465,7 +469,7 @@ def _reported_tool_outcome(event: Any) -> Any:
     if not isinstance(event, ToolResultEvent):
         return event
     part = event.part
-    if codec.media_file_id(part.metadata):
+    if isinstance(part.metadata, dict) and part.metadata.get(TOOL_MEDIA_METADATA_KEY):
         content = codec.without_binary_media(part.content)
         if content is not part.content:
             part = replace(part, content=content)

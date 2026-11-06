@@ -22,7 +22,6 @@ from pydantic_ai.messages import (
     AudioUrl,
     BinaryContent,
     DocumentUrl,
-    FilePart,
     FileUrl,
     ImageUrl,
     ModelMessage,
@@ -41,12 +40,11 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.usage import RequestUsage
 
+from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
 from app.domain.run_items import (
-    MEDIA_FILE_ID_KEY,
     ApprovalRequestItem,
     CallRequestItem,
     CompactionItem,
-    FileItem,
     ImageItem,
     ResourceItem,
     RunItem,
@@ -157,22 +155,9 @@ def _without_binary(value: Any) -> Any:
 
 
 def without_binary_media(content: Any) -> Any:
-    """落库/上报前剥掉工具结果里的 base64 图片；引用留在 metadata 里。"""
+    """落库/上报前剥掉工具结果里的 base64 图片；引用留在 ToolResultItem.media。"""
     stripped = _without_binary(content)
     return None if stripped is _DROPPED else stripped
-
-
-def media_file_id(metadata: Any) -> str | None:
-    """工具结果 metadata 里登记的媒体文件引用；有它才剥二进制、也才有东西可回填。"""
-    if isinstance(metadata, dict):
-        file_id = metadata.get(MEDIA_FILE_ID_KEY)
-        if isinstance(file_id, str) and file_id:
-            return file_id
-    return None
-
-
-def tool_result_file_id(item: ToolResultItem) -> str | None:
-    return media_file_id(item.metadata)
 
 
 def usage_delta(total: TokenUsage, prior: TokenUsage | None) -> TokenUsage:
@@ -211,19 +196,14 @@ def _user_content(item: RunItem, media: Mapping[str, tuple[bytes, str]] | None =
     if isinstance(item, TextItem):
         return item.text
     if isinstance(item, ResourceItem):
-        return resource_tag(item.storage_key, item.name, item.media_type)
+        return resource_tag(item.file_id, item.name, item.media_type)
     if isinstance(item, (ImageItem, VideoItem)):
-        if not item.file_id:
-            return None
-        is_image = isinstance(item, ImageItem)
-        media_type = item.media_type or ("image/png" if is_image else "video/mp4")
-        name = item.alt or ("image" if is_image else "video")
-        # 标签给模型一个可引用的 storage_key；字节随消息内联，模型直接看得到内容
-        tag = resource_tag(item.file_id, name, media_type)
+        # 标签给模型一个可引用的 file_id；字节随消息内联，模型直接看得到内容
+        tag = resource_tag(item.file_id, item.name, item.media_type)
         entry = (media or {}).get(item.file_id)
         if entry is None:
             return tag
-        return [tag, BinaryContent(data=entry[0], media_type=entry[1])]
+        return [tag, BinaryContent(data=entry[0], media_type=item.media_type)]
     return None
 
 
@@ -231,23 +211,19 @@ def _tool_return_part(
     item: ToolResultItem, media: Mapping[str, tuple[bytes, str]] | None = None
 ) -> ToolReturnPart | RetryPromptPart:
     content = content_from_json(item.content)
-    file_id = tool_result_file_id(item)
-    entry = (media or {}).get(file_id) if file_id else None
-    if entry is not None:
-        # 落库时剥掉的图片按 file_id 取回来了；引用文本仍在 content 里
-        media_type = entry[1]
-        if isinstance(item.metadata, dict):
-            declared = item.metadata.get("media_type")
-            if isinstance(declared, str) and declared:
-                # 工具读取时已经按魔数校正过类型，优先用它而不是文件记录的 mime
-                media_type = declared
-        image = BinaryContent(data=entry[0], media_type=media_type)
+    payloads = [
+        BinaryContent(data=entry[0], media_type=ref.media_type)
+        for ref in item.media
+        if (entry := (media or {}).get(ref.file_id)) is not None
+    ]
+    if payloads:
+        # 落库时剥掉的媒体按 file_id 取回来了；引用文本仍在 content 里
         if isinstance(content, list):
-            content = [*content, image]
+            content = [*content, *payloads]
         elif content is None:
-            content = [image]
+            content = payloads
         else:
-            content = [content, image]
+            content = [content, *payloads]
     if item.outcome == "retried":
         return RetryPromptPart(
             content=content if isinstance(content, (str, list)) else str(content),
@@ -277,6 +253,7 @@ def attachment_items(attachments: Sequence[Attachment]) -> list[RunItem]:
                 ImageItem(
                     role="user",
                     file_id=attachment.file_id,
+                    name=attachment.name,
                     media_type=attachment.media_type,
                     alt=attachment.name,
                 )
@@ -286,42 +263,12 @@ def attachment_items(attachments: Sequence[Attachment]) -> list[RunItem]:
                 VideoItem(
                     role="user",
                     file_id=attachment.file_id,
+                    name=attachment.name,
                     media_type=attachment.media_type,
                     alt=attachment.name,
                 )
             )
     return items
-
-
-def _binary_items(content: BinaryContent, *, name: str) -> list[RunItem]:
-    """模型直接产出的二进制：只落成展示用 item（没有 file_id，不进上下文）。
-
-    base64 是这条遗留路径的例外：模型原生输出没有经过工具上传，拿不到文件引用。
-    """
-    media_type = str(content.media_type)
-    data = base64.b64encode(content.data).decode("ascii")
-    if media_type.startswith("image/"):
-        return [
-            ImageItem(
-                role="assistant", data=data, media_type=media_type, alt=name, in_context=False
-            )
-        ]
-    if media_type.startswith("video/"):
-        return [
-            VideoItem(
-                role="assistant", data=data, media_type=media_type, alt=name, in_context=False
-            )
-        ]
-    return [
-        FileItem(
-            role="assistant",
-            name=name,
-            media_type=media_type,
-            data=data,
-            size=len(content.data),
-            in_context=False,
-        )
-    ]
 
 
 def items_from_response_part(part: Any) -> list[RunItem]:
@@ -357,23 +304,19 @@ def items_from_response_part(part: Any) -> list[RunItem]:
                 provider_details=part.provider_details,
             )
         ]
-    if isinstance(part, FilePart):
-        return _binary_items(part.content, name=part.id or "file")
+    # 模型原生二进制只能展示、没有 file_id；统一媒体模型不再落 base64
     if isinstance(part, SpeechPart):
-        items: list[RunItem] = []
-        if part.transcript:
-            items.append(
-                TextItem(
-                    role="assistant",
-                    text=part.transcript,
-                    part_id=part.id,
-                    provider_name=part.provider_name,
-                    provider_details=part.provider_details,
-                )
+        if not part.transcript:
+            return []
+        return [
+            TextItem(
+                role="assistant",
+                text=part.transcript,
+                part_id=part.id,
+                provider_name=part.provider_name,
+                provider_details=part.provider_details,
             )
-        if part.audio is not None:
-            items.extend(_binary_items(part.audio, name="speech"))
-        return items
+        ]
     return []
 
 
@@ -413,12 +356,26 @@ def tool_result_item(part: ToolReturnPart | RetryPromptPart) -> ToolResultItem:
     outcome = part.outcome
     if outcome == "success" and content_reports_failure(part.content):
         outcome = "failed"
+    metadata = part.metadata
+    media: list[FileRef] = []
+    if isinstance(metadata, dict):
+        raw_media = metadata.get(TOOL_MEDIA_METADATA_KEY)
+        if isinstance(raw_media, list):
+            for entry in raw_media:
+                try:
+                    media.append(FileRef.model_validate(entry))
+                except ValueError:
+                    continue
+            metadata = {
+                key: value for key, value in metadata.items() if key != TOOL_MEDIA_METADATA_KEY
+            } or None
     return ToolResultItem(
         tool_call_id=part.tool_call_id,
         tool_name=part.tool_name,
         content=content_to_json(part.content),
         outcome=outcome,
-        metadata=to_json_value(part.metadata),
+        metadata=to_json_value(metadata),
+        media=media,
     )
 
 
@@ -436,45 +393,9 @@ def items_from_message(message: ModelMessage) -> list[RunItem]:
                 items.append(TextItem(role="user", text=content))
                 continue
             for element in content:
+                # 没有 file_id 的 URL/base64 无法回放成统一媒体 item，导入时直接忽略
                 if isinstance(element, str):
                     items.append(TextItem(role="user", text=element))
-                # url/base64 形态没有 file_id，回放不出模型消息，只能给 UI 展示
-                elif isinstance(element, ImageUrl):
-                    items.append(ImageItem(role="user", url=element.url, in_context=False))
-                elif isinstance(element, VideoUrl):
-                    items.append(VideoItem(role="user", url=element.url, in_context=False))
-                elif isinstance(element, BinaryContent):
-                    encoded = base64.b64encode(element.data).decode("ascii")
-                    media_type = str(element.media_type)
-                    if media_type.startswith("image/"):
-                        items.append(
-                            ImageItem(
-                                role="user",
-                                data=encoded,
-                                media_type=media_type,
-                                in_context=False,
-                            )
-                        )
-                    elif media_type.startswith("video/"):
-                        items.append(
-                            VideoItem(
-                                role="user",
-                                data=encoded,
-                                media_type=media_type,
-                                in_context=False,
-                            )
-                        )
-                    else:
-                        items.append(
-                            FileItem(
-                                role="user",
-                                name="file",
-                                media_type=media_type,
-                                data=encoded,
-                                size=len(element.data),
-                                in_context=False,
-                            )
-                        )
         elif isinstance(request_part, SystemPromptPart):
             items.append(TextItem(role="system", text=request_part.content))
         elif isinstance(request_part, (ToolReturnPart, RetryPromptPart)):

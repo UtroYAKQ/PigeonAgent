@@ -30,7 +30,7 @@ async def test_resource_item_renders_tag_in_user_content(db_session: AsyncSessio
     record, _ = await _seed_file(db_session, "note.md", "text/markdown")
     item = run_item.ResourceItem(
         role="user",
-        storage_key=str(record.id),
+        file_id=str(record.id),
         name=record.name,
         media_type=record.content_type or "application/octet-stream",
     )
@@ -50,7 +50,7 @@ def test_run_create_accepts_and_validates_resources() -> None:
     payload = RunCreate.model_validate(
         {
             "input": "分析这个文件",
-            "resources": [{"storage_key": key, "name": "a.md"}],
+            "resources": [{"file_id": key, "name": "a.md"}],
         }
     )
     assert payload.resources[0].name == "a.md"
@@ -59,13 +59,13 @@ def test_run_create_accepts_and_validates_resources() -> None:
         RunCreate.model_validate(
             {
                 "input": "x",
-                "resources": [{"storage_key": "not-a-uuid", "name": "a.md"}],
+                "resources": [{"file_id": "not-a-uuid", "name": "a.md"}],
             }
         )
     except Exception as exc:
-        assert "storage_key" in str(exc)
+        assert "file_id" in str(exc)
     else:
-        raise AssertionError("非法 storage_key 应当被拒")
+        raise AssertionError("非法 file_id 应当被拒")
 
 
 async def test_resource_items_for_resolves_and_errors(
@@ -75,14 +75,14 @@ async def test_resource_items_for_resolves_and_errors(
     key = str(record.id)
     missing = str(uuid.uuid4())
 
-    items = await file_service.resource_items_for(db_session, [ResourceRef(storage_key=key)])
+    items = await file_service.resource_items_for(db_session, [ResourceRef(file_id=key)])
     assert len(items) == 1
     assert items[0].name == "main.md"  # 命名以库里为准，不用调用方伪造
 
     try:
         await file_service.resource_items_for(
             db_session,
-            [ResourceRef(storage_key=missing)],
+            [ResourceRef(file_id=missing)],
         )
     except Exception as exc:
         assert missing in str(exc)
@@ -93,14 +93,12 @@ async def test_resource_items_for_resolves_and_errors(
 async def test_image_resource_becomes_image_item(db_session: AsyncSession) -> None:
     """图片引用落成 ImageItem(file_id)：上下文里是 <resource/> 标签 + 内联图片。"""
     record, fake = await _seed_file(db_session, "pic.png", "image/png")
-    items = await file_service.resource_items_for(
-        db_session, [ResourceRef(storage_key=str(record.id))]
-    )
+    items = await file_service.resource_items_for(db_session, [ResourceRef(file_id=str(record.id))])
     assert len(items) == 1
     image = items[0]
     assert isinstance(image, run_item.ImageItem)
     assert image.file_id == str(record.id)
-    assert image.data is None and image.url is None
+    assert image.name == "pic.png"
     assert image.media_type == "image/png"
 
     media = await file_service.load_media(db_session, [image.file_id], storage=fake)
@@ -120,7 +118,7 @@ async def test_video_item_inlines_content_and_tag(db_session: AsyncSession) -> N
     video = run_item.VideoItem(
         role="user",
         file_id=str(record.id),
-        alt="clip.mp4",
+        name="clip.mp4",
         media_type="video/mp4",
     )
     media = await file_service.load_media(db_session, [video.file_id], storage=fake)
@@ -134,7 +132,7 @@ async def test_video_item_inlines_content_and_tag(db_session: AsyncSession) -> N
 async def test_image_item_missing_media_falls_back_to_tag(db_session: AsyncSession) -> None:
     """key 失效（没配存储/内容没了）只退化成标签，不打断整轮上下文。"""
     fid = str(uuid.uuid4())
-    image = run_item.ImageItem(role="user", file_id=fid, alt="pic")
+    image = run_item.ImageItem(role="user", file_id=fid, name="pic.png")
     request = messages_from_items([image], media={})[-1]
     [prompt] = [part for part in request.parts if isinstance(part, UserPromptPart)]
     assert isinstance(prompt.content, str)
@@ -149,7 +147,7 @@ async def test_attachment_file_id_and_validation() -> None:
     att = {"kind": "video", "name": "p.mp4", "media_type": "video/mp4", "file_id": fid}
     [item] = attachment_items([run_item_attachment(att)])
     assert isinstance(item, run_item.VideoItem)
-    assert item.file_id == fid and item.data is None
+    assert item.file_id == fid
 
     # base64 兜底已删：data 是多余字段
     try:
@@ -258,3 +256,38 @@ def run_item_attachment(payload: dict[str, Any]) -> Any:
     from app.schemas.run import Attachment
 
     return Attachment.model_validate(payload)
+
+
+def test_legacy_media_items_load_into_file_id_model() -> None:
+    """线上旧 item 是 storage_key/alt 字段；新模型必须原地读出，不能等数据迁移。"""
+    key = str(uuid.uuid4())
+    resource = run_item.ResourceItem.model_validate(
+        {
+            "id": str(uuid.uuid4()),
+            "type": "resource",
+            "role": "assistant",
+            "storage_key": key,
+            "name": "a.pdf",
+            "media_type": "application/pdf",
+            "size": 10,
+            "in_context": False,
+            "display": True,
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    assert resource.file_id == key
+
+    image = run_item.ImageItem.model_validate(
+        {
+            "id": str(uuid.uuid4()),
+            "type": "image",
+            "role": "assistant",
+            "file_id": key,
+            "media_type": "image/png",
+            "alt": "pic.png",
+            "in_context": False,
+            "display": True,
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    assert image.name == "pic.png"

@@ -32,7 +32,7 @@ from app.domain.run_items import (
     ToolResultItem,
     VideoItem,
 )
-from app.enums import RunKind, RunStatus
+from app.enums import RunStatus
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
 from app.schemas.run import Attachment, BranchNav
@@ -128,7 +128,7 @@ async def branch_navs(
     分支拓扑只在新建 run / 切换叶子时变化，用小 LRU 按
     (run_seq, active_leaf_run_id) 缓存整张导航表；翻页和重复请求不再扫全树。
     """
-    if not any(run.kind == RunKind.TURN.value for run in runs):
+    if not runs:
         return {}
     if chat_session is None:
         chat_session = await db.get(ChatSession, session_id)
@@ -142,12 +142,11 @@ async def branch_navs(
 
     rows = (
         await db.execute(
-            select(SessionRun.id, SessionRun.parent_run_id, SessionRun.kind, SessionRun.seq)
+            select(SessionRun.id, SessionRun.parent_run_id, SessionRun.seq)
             .where(SessionRun.session_id == session_id)
             .order_by(SessionRun.seq)
         )
     ).all()
-    kinds = {row.id: row.kind for row in rows}
     children: dict[UUID | None, list[UUID]] = {}
     for row in rows:
         children.setdefault(row.parent_run_id, []).append(row.id)
@@ -170,13 +169,7 @@ async def branch_navs(
 
     navs: dict[UUID, BranchNav] = {}
     for row in rows:
-        if row.kind != RunKind.TURN.value:
-            continue
-        siblings = [
-            run_id
-            for run_id in children.get(row.parent_run_id, [])
-            if kinds[run_id] == RunKind.TURN.value
-        ]
+        siblings = children.get(row.parent_run_id, [])
         if len(siblings) < 2:
             continue
         navs[row.id] = BranchNav(
@@ -347,13 +340,11 @@ async def build_context(
         for item in items
         if item.in_context and isinstance(item, (ImageItem, VideoItem)) and item.file_id
     ]
-    # 读图工具的结果把 base64 剥进了 metadata；同样按 file_id 取回来
+    # 读图工具的结果把 base64 剥成了 media 引用；同样按 file_id 取回来
     for _, items in slices:
         for item in items:
             if isinstance(item, ToolResultItem) and item.in_context:
-                file_id = codec.tool_result_file_id(item)
-                if file_id:
-                    media_ids.append(file_id)
+                media_ids.extend(ref.file_id for ref in item.media)
     media = await file_service.load_media(db, media_ids)
     for run, items in slices:
         messages.extend(codec.messages_from_items(items, usage=run.usage, media=media))
@@ -449,7 +440,6 @@ async def create_run(
     content: Sequence[RunItem] = (),
     parent_run_id: UUID | None = None,
     status: RunStatus = RunStatus.RUNNING,
-    kind: RunKind = RunKind.TURN,
     model_id: int | None = None,
     usage: TokenUsage | None = None,
     set_leaf: bool = True,
@@ -465,7 +455,6 @@ async def create_run(
         parent_run_id=parent_run_id,
         seq=chat_session.run_seq,
         status=status.value,
-        kind=kind.value,
         content=list(content),
         model_id=model_id,
         preview=codec.preview_of(content),
@@ -568,7 +557,6 @@ async def start_run_turn(
         parent_run_id=parent,
         seq=chat_session.run_seq,
         status=RunStatus.RUNNING.value,
-        kind=RunKind.TURN.value,
         content=content,
         model_id=model_id,
         preview=codec.preview_of(content),

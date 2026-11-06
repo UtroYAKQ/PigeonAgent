@@ -50,7 +50,7 @@ async def test_artifact_event_persists_display_only_resource() -> None:
     [item] = store.appended
     assert isinstance(item, ResourceItem)
     assert item.role == "assistant"
-    assert item.storage_key == file_id
+    assert item.file_id == file_id
     assert item.name == "sea_day.png"
     assert item.media_type == "image/png"
     assert item.size == 1024
@@ -80,7 +80,7 @@ def test_assistant_resource_never_renders_as_user_content() -> None:
     """即使有人忘了 in_context=False，assistant 产物也不能冒充用户内容。"""
     item = ResourceItem(
         role="assistant",
-        storage_key=str(uuid.uuid4()),
+        file_id=str(uuid.uuid4()),
         name="a.pdf",
     )
     assert codec.messages_from_items([item]) == []
@@ -88,7 +88,7 @@ def test_assistant_resource_never_renders_as_user_content() -> None:
 
 def test_user_resource_still_renders_tag() -> None:
     key = str(uuid.uuid4())
-    item = ResourceItem(role="user", storage_key=key, name="a.pdf")
+    item = ResourceItem(role="user", file_id=key, name="a.pdf")
     message = codec.messages_from_items([item])[-1]
     content = message.parts[0].content
     assert isinstance(content, str) and key in content
@@ -102,7 +102,7 @@ async def test_publish_tool_result_only_persists_tool_result() -> None:
             tool_name="publish_file",
             tool_call_id="call_1",
             content={
-                "storage_key": file_id,
+                "file_id": file_id,
                 "name": "sea_day.png",
                 "size": 1024,
                 "media_type": "image/png",

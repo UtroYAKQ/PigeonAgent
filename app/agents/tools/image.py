@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.events import ImageGeneratedEvent
 from app.core.config import Settings
-from app.domain.run_items import MEDIA_FILE_ID_KEY
+from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
+from app.domain.media_type import detect_media_type
 from app.infra.image_factory import ImageGenerationError, create_client
 from app.infra.storage import ObjectStorage, get_storage
 from app.sandbox.workspace import RunWorkspace, parse_storage_key
@@ -90,11 +91,11 @@ def make_generate_image(
                     image.media_type,
                     image.data,
                 )
-            storage_key = str(file.id)
+            file_id = str(file.id)
             size_bytes = len(image.data)
             saved.append(
                 {
-                    "storage_key": storage_key,
+                    "file_id": file_id,
                     "name": name,
                     "media_type": image.media_type,
                     "size": size_bytes,
@@ -104,7 +105,7 @@ def make_generate_image(
             # 逐张通知 turn 落库并推给前端；工具本身不碰 run content
             await ctx.emit(
                 ImageGeneratedEvent(
-                    storage_key=storage_key,
+                    file_id=file_id,
                     file_name=name,
                     media_type=image.media_type,
                     size=size_bytes,
@@ -134,7 +135,7 @@ def make_generate_image(
             "images": saved,
             "note": (
                 "图片已经展示给用户，回复里不用再重复描述画面细节；"
-                "需要读取图片内容时，把 storage_key 传给 read_image。"
+                "需要读取图片内容时，把 file_id 传给 read_image。"
             ),
         }
         if size_note:
@@ -152,7 +153,7 @@ def make_read_image(
     storage: ObjectStorage,
     workspace: RunWorkspace | None,
 ) -> Callable[..., Coroutine[Any, Any, ToolReturn]]:
-    """读取图片内容；接受 storage_key 或工作区相对路径，路径会先上传成文件引用。"""
+    """读取图片内容；接受 file_id 或工作区相对路径，路径会先上传成文件引用。"""
 
     async def read_image(source: str) -> ToolReturn:
         """读取一张图片，把画面内容直接提供给你（支持 PNG/JPEG/WebP/GIF）。
@@ -161,7 +162,8 @@ def make_read_image(
         用户直接上传的图片已经能看见，不用重复调用。
 
         Args:
-            source: 图片的 storage_key（<resource/> 里的值）或工作区相对路径，如 out/chart.png。
+            source: 图片的 file_id（resource 标签里的 storage_key）或工作区相对路径，
+                例如 out/chart.png。
         """
         target = (source or "").strip()
         if not target:
@@ -178,14 +180,14 @@ def make_read_image(
             return _image_result(str(file_id), name, data, settings)
 
         if workspace is None:
-            return _error("当前会话没有工作区，只能用 storage_key 读取图片")
+            return _error("当前会话没有工作区，只能用 file_id 读取图片")
         try:
             data = await workspace.read_binary(target, max_bytes=settings.max_upload_bytes)
         except Exception as exc:
             return _error(_reason(exc))
 
-        media_type = _sniff_image_type(data)
-        if media_type is None:
+        media_type = detect_media_type(target, data)
+        if media_type not in _READABLE_IMAGE_TYPES:
             return _error("不是受支持的图片格式；read_image 只读 PNG/JPEG/WebP/GIF")
         name = PurePosixPath(target.replace("\\", "/")).name or "image"
         try:
@@ -201,23 +203,19 @@ def make_read_image(
     return read_image
 
 
-def _image_result(storage_key: str, name: str, data: bytes, settings: Settings) -> ToolReturn:
-    media_type = _sniff_image_type(data)
-    if media_type is None:
+def _image_result(file_id: str, name: str, data: bytes, settings: Settings) -> ToolReturn:
+    media_type = detect_media_type(name, data)
+    if media_type not in _READABLE_IMAGE_TYPES:
         return _error("不是受支持的图片格式；read_image 只读 PNG/JPEG/WebP/GIF")
     if len(data) > settings.max_upload_bytes:
         return _error(f"图片超过 {settings.max_upload_bytes // 1024 // 1024} MB 上限")
+    file_ref = FileRef(file_id=file_id, name=name, media_type=media_type, size=len(data))
     return ToolReturn(
         return_value=[
-            {
-                "storage_key": storage_key,
-                "name": name,
-                "media_type": media_type,
-                "size": len(data),
-            },
+            file_ref.model_dump(),
             BinaryContent(data=data, media_type=media_type),
         ],
-        metadata={MEDIA_FILE_ID_KEY: storage_key, "name": name, "media_type": media_type},
+        metadata={TOOL_MEDIA_METADATA_KEY: [file_ref.model_dump()]},
     )
 
 
@@ -229,17 +227,7 @@ def _reason(exc: Exception) -> str:
     return (str(exc) or type(exc).__name__)[:500]
 
 
-def _sniff_image_type(data: bytes) -> str | None:
-    """按魔数判图，不信扩展名和入库时声明的 mime。"""
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data.startswith((b"GIF87a", b"GIF89a")):
-        return "image/gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return None
+_READABLE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 
 def _extension(media_type: str) -> str:

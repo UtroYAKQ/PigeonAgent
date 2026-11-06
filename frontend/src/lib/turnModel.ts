@@ -1,7 +1,6 @@
 import type {
   CompactionItem,
   ErrorItem,
-  FileItem,
   ImageItem,
   LiveMedia,
   LiveRun,
@@ -85,7 +84,6 @@ export interface TurnView {
   userImages: ImageItem[]
   userVideos: VideoItem[]
   userResources: ResourceItem[]
-  userFiles: FileItem[]
   assistantText: string
   segments: TurnSegment[]
   steps: ToolStep[]
@@ -110,7 +108,6 @@ function emptyView(): TurnView {
     userImages: [],
     userVideos: [],
     userResources: [],
-    userFiles: [],
     assistantText: '',
     segments: [],
     steps: [],
@@ -217,39 +214,16 @@ function collectArtifacts(state: SegmentState, view: TurnView, media: ArtifactMe
   if (files.length) view.attachments.push(...files)
 }
 
-function mediaFromItem(item: ImageItem | VideoItem | ResourceItem | FileItem): ArtifactMedia {
-  if (item.type === 'resource') {
-    // 工作区发布的图也要预览出来，否则用户分不清自己拿到的是什么
-    return {
-      id: item.id,
-      kind: mediaKind(item.media_type),
-      origin: 'workspace',
-      mediaType: item.media_type,
-      fileId: item.storage_key,
-      name: item.name,
-      size: item.size,
-    }
-  }
-  if (item.type === 'file') {
-    return {
-      id: item.id,
-      kind: mediaKind(item.media_type),
-      origin: 'workspace',
-      mediaType: item.media_type,
-      data: item.data,
-      name: item.name,
-      size: item.size,
-    }
-  }
+function mediaFromItem(item: ImageItem | VideoItem | ResourceItem): ArtifactMedia {
   return {
     id: item.id,
-    kind: item.type === 'video' ? 'video' : 'image',
-    origin: 'generated',
-    mediaType: item.media_type ?? (item.type === 'video' ? 'video/mp4' : 'image/png'),
+    kind: mediaKind(item.media_type),
+    origin: item.type === 'resource' ? 'workspace' : 'generated',
+    mediaType: item.media_type,
     fileId: item.file_id,
-    src: item.url,
-    data: item.data,
-    alt: item.alt,
+    name: item.name,
+    size: item.size,
+    alt: item.type === 'resource' ? null : (item.alt ?? null),
   }
 }
 
@@ -279,7 +253,6 @@ export function projectLiveRun(runs: SessionRun[], live: LiveRun | null): Sessio
     parent_run_id: null,
     seq: runs.length + 1,
     status: 'running',
-    kind: 'turn',
     content: [],
     preview: '',
     usage: live.usage ?? {
@@ -330,7 +303,6 @@ function fillUser(view: TurnView, run: SessionRun): void {
     else if (item.type === 'image' && item.role === 'user') view.userImages.push(item)
     else if (item.type === 'video' && item.role === 'user') view.userVideos.push(item)
     else if (item.type === 'resource' && item.role === 'user') view.userResources.push(item)
-    else if (item.type === 'file' && item.role === 'user') view.userFiles.push(item)
   }
   view.userText = text.join('\n\n')
 }
@@ -490,9 +462,6 @@ function buildHistoryView(
       case 'resource':
         if (item.role === 'assistant') collectArtifacts(state, view, [mediaFromItem(item)])
         break
-      case 'file':
-        if (item.role === 'assistant') collectArtifacts(state, view, [mediaFromItem(item)])
-        break
       case 'error':
         view.error = item
         break
@@ -612,7 +581,6 @@ export function mergeTurnViews(base: TurnView | null, live: TurnView): TurnView 
     userImages: [...base.userImages, ...live.userImages],
     userVideos: [...base.userVideos, ...live.userVideos],
     userResources: [...base.userResources, ...live.userResources],
-    userFiles: [...base.userFiles, ...live.userFiles],
     assistantText: assistantTextOf(segments),
     segments,
     steps,
@@ -637,7 +605,6 @@ export function hasUserOutput(view: TurnView): boolean {
     view.userText
     || view.userImages.length
     || view.userVideos.length
-    || view.userResources.length
-    || view.userFiles.length,
+    || view.userResources.length,
   )
 }

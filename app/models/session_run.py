@@ -18,7 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 from app.db.types import PydanticJson
 from app.domain.run_items import RunItem, TokenUsage
-from app.enums import RunKind, RunStatus
+from app.enums import RunStatus
 from app.models.mixins import TimestampMixin
 
 RunItemList = TypeAdapter(list[RunItem])
@@ -51,10 +51,6 @@ class SessionRun(TimestampMixin, Base):
     # running | completed | interrupted | failed | cancelled
     status: Mapped[str] = mapped_column(
         String(16), default=RunStatus.RUNNING.value, server_default=text("'running'")
-    )
-    # turn | resume
-    kind: Mapped[str] = mapped_column(
-        String(16), default=RunKind.TURN.value, server_default=text("'turn'")
     )
     # 类型化事件列表
     content: Mapped[list[RunItem]] = mapped_column(PydanticJson(RunItemList), default=list)

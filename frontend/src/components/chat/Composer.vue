@@ -25,7 +25,6 @@ import { useChatStore } from '@/stores/chat'
 import { useUiStore } from '@/stores/ui'
 import type {
   DraftAttachment,
-  FileItem,
   ImageItem,
   ResourceItem,
   VideoItem,
@@ -82,17 +81,8 @@ const editingResources = computed<ResourceItem[]>(() => {
     (item): item is ResourceItem => item.type === 'resource' && item.role === 'user',
   )
 })
-const editingFiles = computed<FileItem[]>(() => {
-  const run = chat.editingRun
-  if (!run) return []
-  return run.content.filter(
-    (item): item is FileItem => item.type === 'file' && item.role === 'user',
-  )
-})
 const hasEditingAttachments = computed(
-  () => editingMedia.value.length > 0
-    || editingResources.value.length > 0
-    || editingFiles.value.length > 0,
+  () => editingMedia.value.length > 0 || editingResources.value.length > 0,
 )
 
 watch(
@@ -391,8 +381,6 @@ onBeforeUnmount(() => {
                   <AuthMedia
                     :kind="item.type"
                     :file-id="item.file_id"
-                    :src="item.url"
-                    :data="item.data"
                     :media-type="item.media_type"
                     :alt="item.alt"
                     fit="contain"
@@ -414,15 +402,7 @@ onBeforeUnmount(() => {
                 :name="resource.name"
                 :size="resource.size"
                 :media-type="resource.media_type"
-                :file-id="resource.storage_key"
-              />
-              <FileAttachment
-                v-for="file in editingFiles"
-                :key="file.id"
-                :name="file.name"
-                :size="file.size"
-                :media-type="file.media_type"
-                :data="file.data"
+                :file-id="resource.file_id"
               />
             </div>
           </div>

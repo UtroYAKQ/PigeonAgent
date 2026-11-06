@@ -7,7 +7,7 @@ import { encryptedToolOutcome } from '@/lib/toolOutcome'
 function appendGeneratedImage(live: LiveRun, value: unknown): void {
   if (!value || typeof value !== 'object') return
   const raw = value as Record<string, unknown>
-  const fileId = typeof raw.storage_key === 'string' ? raw.storage_key : ''
+  const fileId = typeof raw.file_id === 'string' ? raw.file_id : ''
   if (!fileId) return
   const media: LiveMedia = {
     file_id: fileId,

@@ -12,20 +12,12 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-class RunKind(StrEnum):
-    """run 在树里的用途；分支导航只把 turn 当版本。"""
-
-    TURN = "turn"
-    RESUME = "resume"
-
-
 class ItemType(StrEnum):
     """run.content 里的 item 类型。"""
 
     TEXT = "text"
     IMAGE = "image"
     VIDEO = "video"
-    FILE = "file"
     RESOURCE = "resource"
     THINKING = "thinking"
     TOOL_CALL = "tool_call"

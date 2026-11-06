@@ -284,7 +284,7 @@ export interface MediaPayload {
   data?: string
   url?: string
   name?: string
-  storageKey?: string
+  fileId?: string
   size?: number
 }
 
@@ -334,20 +334,20 @@ export function findMedia(value: unknown, bucket: MediaPayload[] = [], seen = ne
     return bucket
   }
 
-  if (
-    typeof data.storage_key === 'string'
-    && typeof data.name === 'string'
-    && mediaType
-    && data.storage_key.length >= 32
-  ) {
-    const key = `resource:${data.storage_key}`
+  const fileId = typeof data.file_id === 'string'
+    ? data.file_id
+    : typeof data.storage_key === 'string'
+      ? data.storage_key
+      : null
+  if (fileId && typeof data.name === 'string' && mediaType && fileId.length >= 32) {
+    const key = `resource:${fileId}`
     if (!seen.has(key)) {
       seen.add(key)
       bucket.push({
         kind: 'resource',
         mediaType,
         name: data.name,
-        storageKey: data.storage_key,
+        fileId,
         size: typeof data.size === 'number' ? data.size : undefined,
       })
     }

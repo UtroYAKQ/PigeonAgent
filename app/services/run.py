@@ -13,14 +13,14 @@ from typing import Any, cast
 from uuid import UUID, uuid4
 
 from ag_ui.core import RunErrorEvent
-from pydantic_ai import CancellationToken, DeferredToolResults, ModelSettings, Tool
+from pydantic_ai import CancellationToken, DeferredToolResults, ModelSettings
 from pydantic_ai.toolsets import AbstractToolset
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
-from app.agents.tools import frontend_toolset, web_search_tools, workspace_instructions
-from app.agents.tools.workspace import workspace_tools
+from app.agents.tools import frontend_toolset
+from app.agents.tools.bundle import build_tool_bundle
 from app.agents.turn import summarize_error
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
@@ -357,15 +357,7 @@ async def execute_run(
                 isinstance(workspace, SandboxWorkspace)
                 or any(isinstance(item, ResourceItem) for item in run_obj.content)
             )
-            wtools: list[Tool[Any]] = []
             session_owner = await _session_owner(session_factory, session_id)
-            if offer_tools and workspace is not None:
-                wtools = workspace_tools(
-                    workspace,
-                    session_factory,
-                    owner_id=session_owner,
-                    settings=runtime,
-                )
             # 有可用的图片模型、平台开着、本次也开着，才把生成工具挂上去
             image_model = None
             image_ready = (
@@ -376,7 +368,18 @@ async def execute_run(
             if image_ready:
                 image_model = await image_model_service.get_active_model(db, image_model_id)
                 image_ready = image_model is not None
-            search_tools = web_search_tools(runtime) if enable_web_search else []
+            bundle = build_tool_bundle(
+                resolved.model,
+                workspace=workspace,
+                session_factory=session_factory,
+                owner_id=session_owner,
+                settings=runtime,
+                run_id=lambda: run_uuid,
+                image_model_id=image_model.id if image_model is not None else None,
+                enable_image_generation=image_ready,
+                enable_web_search=enable_web_search,
+                offer_workspace_tools=offer_tools,
+            )
             model_settings = _settings_with_thinking(resolved.settings, thinking_level)
 
             # 用量落库后按水位差结算，余额见底就停掉本轮；策略本体在 credit_guard
@@ -396,9 +399,8 @@ async def execute_run(
                 model_id=model_id,
                 session_factory=session_factory,
                 run_id=run_id,
-                tools=[*wtools, *search_tools],
-                workspace=workspace,
-                prompt=workspace_instructions() if wtools else None,
+                tools=bundle.tools,
+                prompt=bundle.instructions,
                 context_window=resolved.context_window,
                 compaction_threshold=(
                     resolved.compaction_threshold
@@ -406,9 +408,6 @@ async def execute_run(
                     else runtime.compaction_threshold
                 ),
                 supports_tools=resolved.supports_tools,
-                owner_id=session_owner,
-                enable_image_generation=image_ready,
-                image_model_id=image_model.id if image_model is not None else None,
                 on_usage=usage_guard,
             )
             # 用户消息已经在 start_run_turn 里写入，agent 只从 message_history 读

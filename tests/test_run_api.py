@@ -148,7 +148,7 @@ async def test_unknown_image_model_is_rejected_before_run_starts(
 async def test_run_with_attachments(
     client: AsyncClient, db_session: AsyncSession, monkeypatch: Any
 ) -> None:
-    """图片走 attachments（file_id），文档走 resources（storage_key 标签）。"""
+    """图片走 attachments（file_id），文档走 resources（file_id 标签）。"""
     from tests.test_files import FakeStorage, storage_override
 
     fake = FakeStorage()
@@ -179,7 +179,7 @@ async def test_run_with_attachments(
                     "file_id": image_id,
                 }
             ],
-            "resources": [{"storage_key": doc_id, "name": "notes.md"}],
+            "resources": [{"file_id": doc_id, "name": "notes.md"}],
         },
     )
 
@@ -194,7 +194,7 @@ async def test_run_with_attachments(
     image_item = next(item for item in content if item["type"] == "image")
     assert image_item["file_id"] == image_id
     resource = next(item for item in content if item["type"] == "resource")
-    assert (resource["storage_key"], resource["name"]) == (doc_id, "notes.md")
+    assert (resource["file_id"], resource["name"]) == (doc_id, "notes.md")
 
     context = await client.get(f"/api/v1/sessions/{session_id}/context")
     assert f'storage_key="{doc_id}"' in str(context.json()["messages"])
@@ -236,8 +236,8 @@ async def test_run_with_uploaded_image_attachment(
     runs = await runs_of(client, session_id)
     image = next(item for item in runs[0]["content"] if item["type"] == "image")
     assert image["file_id"] == file_id
+    assert image["name"] == "pic.png"
     assert image["alt"] == "pic.png"
-    assert image["data"] is None and image["url"] is None
 
 
 async def test_run_rejects_missing_attachment_file_id(

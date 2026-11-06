@@ -21,7 +21,6 @@ function run(content: SessionRun['content'], status: SessionRun['status'] = 'com
     parent_run_id: null,
     seq: 1,
     status,
-    kind: 'turn',
     content,
     preview: '',
     usage,
@@ -389,9 +388,9 @@ describe('buildTurnView', () => {
       type: 'image' as const,
       role: 'assistant' as const,
       file_id: 'a'.repeat(32),
-      data: null,
-      url: null,
+      name: 'snow.png',
       media_type: 'image/png',
+      size: 1024,
       alt: '雪山日出',
     }
 
@@ -422,9 +421,9 @@ describe('buildTurnView', () => {
       type: 'image' as const,
       role: 'assistant' as const,
       file_id: id.padEnd(32, '0'),
-      data: null,
-      url: null,
+      name: `${id}.png`,
       media_type: 'image/png',
+      size: 1024,
       alt: null,
     })
 
@@ -443,7 +442,7 @@ describe('buildTurnView', () => {
       ...base(id),
       type: 'resource' as const,
       role: 'assistant' as const,
-      storage_key: id.padEnd(32, '0'),
+      file_id: id.padEnd(32, '0'),
       media_type: mediaType,
       name: `${id}.dat`,
       size: 1024,
@@ -478,9 +477,9 @@ describe('buildTurnView', () => {
       type: 'image' as const,
       role: 'assistant' as const,
       file_id: 'a'.repeat(32),
-      data: null,
-      url: null,
+      name: 'snow.png',
       media_type: 'image/png',
+      size: 1024,
       alt: '雪山',
     }
 

@@ -508,7 +508,7 @@ export const useChatStore = defineStore('chat', () => {
       .filter(item => item.status === 'ready' && item.record && item.kind === 'resource')
       .slice(0, maxResourceFiles.value)
       .map(item => ({
-        storage_key: item.record!.id,
+        file_id: item.record!.id,
         name: item.record?.name ?? item.file.name,
       }))
 
@@ -638,7 +638,7 @@ export const useChatStore = defineStore('chat', () => {
         return [
           {
             kind: item.type,
-            name: item.alt || '附件',
+            name: item.name || item.alt || '附件',
             media_type: item.media_type || 'application/octet-stream',
             file_id: item.file_id,
           },
@@ -648,7 +648,7 @@ export const useChatStore = defineStore('chat', () => {
     })
     const resources = run.content.flatMap(item => {
       if (item.type === 'resource' && item.role === 'user') {
-        return [{ storage_key: item.storage_key, name: item.name }]
+        return [{ file_id: item.file_id, name: item.name }]
       }
       return []
     })

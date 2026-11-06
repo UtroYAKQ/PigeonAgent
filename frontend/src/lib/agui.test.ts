@@ -37,7 +37,7 @@ const usage = {
 
 function generated(fileId: string) {
   return {
-    storage_key: fileId,
+    file_id: fileId,
     file_name: `${fileId}.png`,
     media_type: 'image/png',
     size: 1024,

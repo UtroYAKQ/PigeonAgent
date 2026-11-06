@@ -22,7 +22,6 @@ function makeRun(content: SessionRun['content']): SessionRun {
     parent_run_id: null,
     seq: 1,
     status: 'interrupted',
-    kind: 'turn',
     content,
     preview: '',
     usage: {

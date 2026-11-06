@@ -13,7 +13,7 @@ from pydantic import (
 
 from app.domain.file_ref import FileIdRef
 from app.domain.run_items import PendingInterrupt, RunItem, TokenUsage
-from app.enums import RunKind, RunStatus
+from app.enums import RunStatus
 
 MAX_TOOL_SCHEMA_CHARS = 4000
 MAX_ATTACHMENTS = 5
@@ -49,7 +49,7 @@ class FrontendTool(BaseModel):
 class Attachment(BaseModel):
     """一轮用户输入附带的图片/视频：先 POST /files 上传，这里只带记录 id。
 
-    文档走 ResourceRef（模型按 storage_key 取用）——图片视频要以二进制直接进上下文，
+    文档走 ResourceRef（模型按 file_id 取用）——图片视频要以二进制直接进上下文，
     才需要 file_id。kind/name/media_type 由服务端按入库记录归一化。
     """
 
@@ -62,11 +62,11 @@ class Attachment(BaseModel):
 
 
 class ResourceRef(BaseModel):
-    """指向已上传文件（POST /files 的产物）的引用；storage_key 就是文件的 id。"""
+    """指向已上传文件（POST /files 的产物）的引用；file_id 就是文件的 id。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    storage_key: FileIdRef
+    file_id: FileIdRef
     # 可选的展示名；缺了用入库时的名字
     name: str | None = Field(default=None, min_length=1, max_length=200)
 
@@ -156,7 +156,6 @@ class SessionRunRead(BaseModel):
     parent_run_id: UUID | None = None
     seq: int
     status: RunStatus
-    kind: RunKind = RunKind.TURN
     content: list[RunItem]
     preview: str = ""
     usage: TokenUsage = Field(default_factory=TokenUsage)

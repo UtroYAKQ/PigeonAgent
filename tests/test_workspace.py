@@ -11,7 +11,7 @@ import pytest
 from pydantic_ai.models.test import TestModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import BaseAgent
+from app.agents.tools.bundle import build_tool_bundle
 from app.agents.tools.workspace import workspace_tools
 from app.core.config import Settings
 from app.models.blob import Blob
@@ -127,10 +127,10 @@ async def test_publish_file_uploads_as_owner(
     assert result["size"] == len("发布内容".encode())
     assert len(ctx.events) == 1
     media = ctx.events[0].media[0]
-    assert media.file_id == result["storage_key"]
+    assert media.file_id == result["file_id"]
     assert media.origin == "workspace"
     async with db_session_factory() as db:
-        record = await db.get(FileRecord, uuid.UUID(result["storage_key"]))
+        record = await db.get(FileRecord, uuid.UUID(result["file_id"]))
         assert record is not None and record.owner_id == owner
         assert record.name == "报告.txt"
         blob = await db.get(Blob, record.blob_hash)
@@ -138,24 +138,26 @@ async def test_publish_file_uploads_as_owner(
         assert storage.objects[blob.storage_key] == "发布内容".encode()
 
 
-async def test_agent_adds_read_image_only_with_storage(
-    tmp_path: Path, db_session: AsyncSession, db_session_factory: Any
+async def test_tool_bundle_enables_read_image_only_with_storage_and_vision(
+    tmp_path: Path, db_session_factory: Any
 ) -> None:
-    class Agent(BaseAgent):
-        name = "tool-assembly"
-
     settings = Settings(secret_key="x" * 44, workspace_root=str(tmp_path))
     with_storage = LocalWorkspace(settings, FakeStorage(), uuid.uuid4(), "run-a")
 
     def names(workspace: Any, profile: Any = None) -> set[str]:
-        agent = Agent(
+        bundle = build_tool_bundle(
             TestModel(call_tools=[], profile=profile),
-            db=db_session,
-            session_id=uuid.uuid4(),
-            session_factory=db_session_factory,
             workspace=workspace,
+            session_factory=db_session_factory,
+            owner_id=None,
+            settings=settings,
+            run_id=lambda: None,
+            image_model_id=None,
+            enable_image_generation=False,
+            enable_web_search=False,
+            offer_workspace_tools=True,
         )
-        return {tool.name for tool in agent.default_tools()}
+        return {tool.name for tool in bundle.tools}
 
     assert "read_image" in names(with_storage)
 

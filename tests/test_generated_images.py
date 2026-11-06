@@ -28,13 +28,13 @@ class _RecordingStore:
 
 
 async def test_turn_persists_image_event() -> None:
-    storage_key = str(uuid4())
+    file_id = str(uuid4())
     store = _RecordingStore()
     turn = AgentTurn(object(), store, None)  # type: ignore[arg-type]
 
     await turn._handle_record_event(
         ImageGeneratedEvent(
-            storage_key=storage_key,
+            file_id=file_id,
             file_name="generated-1.png",
             media_type="image/png",
             size=128,
@@ -46,7 +46,8 @@ async def test_turn_persists_image_event() -> None:
     image = store.appended[0]
     assert isinstance(image, ImageItem)
     assert image.role == "assistant"
-    assert image.file_id == storage_key
+    assert image.file_id == file_id
+    assert image.name == "generated-1.png"
     assert image.media_type == "image/png"
     assert image.alt == "雪山日出"
     assert image.in_context is False
@@ -134,7 +135,7 @@ async def test_generate_image_tool_returns_keys_and_emits_events(
     assert result["count"] == 2
     assert len(result["images"]) == 2
     assert set(result["images"][0]) == {
-        "storage_key",
+        "file_id",
         "name",
         "media_type",
         "size",
@@ -146,7 +147,7 @@ async def test_generate_image_tool_returns_keys_and_emits_events(
 
     assert len(ctx.events) == 2
     assert all(isinstance(event, ImageGeneratedEvent) for event in ctx.events)
-    assert [event.storage_key for event in ctx.events] == [
-        entry["storage_key"] for entry in result["images"]
+    assert [event.file_id for event in ctx.events] == [
+        entry["file_id"] for entry in result["images"]
     ]
     assert charged == [(owner, 2, run_id)]

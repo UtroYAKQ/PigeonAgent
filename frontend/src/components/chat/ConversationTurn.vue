@@ -75,7 +75,6 @@ const view = computed(() => {
   combined.userImages = merged.userImages
   combined.userVideos = merged.userVideos
   combined.userResources = merged.userResources
-  combined.userFiles = merged.userFiles
   return combined
 })
 

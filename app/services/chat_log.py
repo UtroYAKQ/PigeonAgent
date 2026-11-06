@@ -61,7 +61,6 @@ async def finish_run_log(
             user_id=owner_id,
             session_id=session_id,
             run_id=run_id,
-            kind=run.kind,
             status=status or "unknown",
             model_id=run.model_id,
             model_name=model.name if model is not None else None,
@@ -77,7 +76,6 @@ async def finish_run_log(
         # 中断后续写：同一轮只保留一条日志，更新到最后一次收尾
         log.user_id = owner_id
         log.session_id = session_id
-        log.kind = run.kind
         log.status = status or "unknown"
         log.model_id = run.model_id
         log.model_name = model.name if model is not None else None

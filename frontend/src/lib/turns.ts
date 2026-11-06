@@ -29,24 +29,8 @@ function sumUsage(runs: SessionRun[]): TokenUsage {
 }
 
 export function groupTurnRuns(runs: SessionRun[]): TurnGroup[] {
-  const groups: TurnGroup[] = []
-  const groupByRun = new Map<string, TurnGroup>()
-
-  for (const run of runs) {
-    const parentGroup = run.kind === 'resume' && run.parent_run_id
-      ? groupByRun.get(run.parent_run_id)
-      : undefined
-    if (parentGroup) {
-      parentGroup.runs.push(run)
-      parentGroup.leaf = run
-      groupByRun.set(run.id, parentGroup)
-      continue
-    }
-    const group: TurnGroup = { id: run.id, run, leaf: run, runs: [run] }
-    groups.push(group)
-    groupByRun.set(run.id, group)
-  }
-  return groups
+  // 一次可见轮次就是一条 run；续写也写回同一条，不存在需要合并的 resume 子 run。
+  return runs.map(run => ({ id: run.id, run, leaf: run, runs: [run] }))
 }
 
 export function mergeTurnRuns(runs: SessionRun[]): SessionRun | null {

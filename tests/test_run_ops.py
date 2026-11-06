@@ -22,7 +22,7 @@ from app.domain.run_items import (
     TextItem,
     ToolResultItem,
 )
-from app.enums import RunKind, RunStatus
+from app.enums import RunStatus
 from app.services import run_store as run_service
 from tests.helpers import (
     all_runs,
@@ -232,7 +232,6 @@ async def test_branch_navs_follow_the_latest_tip(db_session: AsyncSession) -> No
         run_id=uuid4(),
         content=[TextItem(role="user", text="A2")],
         parent_run_id=root.id,
-        kind=RunKind.RESUME,
     )
     sibling = await run_service.create_run(
         db_session,

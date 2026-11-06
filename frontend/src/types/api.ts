@@ -256,7 +256,6 @@ export interface FileLink {
 /* ---------------------------------- runs ---------------------------------- */
 
 export type RunStatus = 'running' | 'completed' | 'interrupted' | 'failed' | 'cancelled'
-export type RunKind = 'turn' | 'resume'
 
 export interface BranchNav {
   position: number
@@ -280,39 +279,32 @@ export interface TextItem extends BaseItem {
   provider_details?: Record<string, unknown> | null
 }
 
-export interface ImageItem extends BaseItem {
-  type: 'image'
-  role: 'user' | 'assistant'
-  url?: string | null
-  data?: string | null
-  file_id?: string | null
-  media_type?: string | null
-  alt?: string | null
-}
-
-export interface VideoItem extends BaseItem {
-  type: 'video'
-  role: 'user' | 'assistant'
-  url?: string | null
-  data?: string | null
-  file_id?: string | null
-  media_type?: string | null
-  alt?: string | null
-}
-
-export interface FileItem extends BaseItem {
-  type: 'file'
-  role: 'user' | 'assistant'
+interface FileMediaItem extends BaseItem {
+  file_id: string
   name: string
   media_type: string
-  data: string
   size: number
 }
 
-export interface ResourceItem extends BaseItem {
+export interface ImageItem extends FileMediaItem {
+  type: 'image'
+  role: 'user' | 'assistant'
+  alt?: string | null
+}
+
+export interface VideoItem extends FileMediaItem {
+  type: 'video'
+  role: 'user' | 'assistant'
+  alt?: string | null
+}
+
+export interface ResourceItem extends FileMediaItem {
   type: 'resource'
   role: 'user' | 'assistant'
-  storage_key: string
+}
+
+export interface FileRef {
+  file_id: string
   name: string
   media_type: string
   size: number
@@ -346,6 +338,7 @@ export interface ToolResultItem extends BaseItem {
   content: unknown
   outcome: ToolOutcome
   metadata?: unknown
+  media?: FileRef[]
 }
 
 export interface ErrorItem extends BaseItem {
@@ -388,7 +381,6 @@ export type RunItem =
   | TextItem
   | ImageItem
   | VideoItem
-  | FileItem
   | ResourceItem
   | ThinkingItem
   | ToolCallItem
@@ -405,7 +397,6 @@ export interface SessionRun {
   parent_run_id: UUID | null
   seq: number
   status: RunStatus
-  kind: RunKind
   content: RunItem[]
   preview: string
   usage: TokenUsage
@@ -430,7 +421,7 @@ export interface AttachmentPayload {
 }
 
 export interface ResourcePayload {
-  storage_key: string
+  file_id: string
   name?: string | null
 }
 

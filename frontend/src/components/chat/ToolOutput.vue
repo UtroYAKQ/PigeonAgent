@@ -248,11 +248,11 @@ const args = computed(() => {
           class="max-h-64 w-full max-w-[420px] rounded-lg border border-border"
         />
         <FileAttachment
-          v-else-if="item.kind === 'resource' && item.storageKey && item.name"
+          v-else-if="item.kind === 'resource' && item.fileId && item.name"
           :name="item.name"
           :size="item.size"
           :media-type="item.mediaType"
-          :file-id="item.storageKey"
+          :file-id="item.fileId"
         />
       </template>
     </div>

@@ -25,6 +25,7 @@ from app.core.exceptions import (
     StorageUnavailableError,
     UnprocessableError,
 )
+from app.domain.media_type import detect_media_type
 from app.domain.run_items import ImageItem, ResourceItem, RunItem, VideoItem
 from app.infra.file_records import is_owner_visible, resolve_resources
 from app.infra.storage import ObjectStorage, get_storage, safe_name, upload_key
@@ -222,6 +223,8 @@ async def direct_upload(
     body: bytes,
 ) -> FileRead:
     """小文件直传：服务端亲算 hash，先对齐物理层再建逻辑引用。"""
+    if not content_type or content_type == "application/octet-stream":
+        content_type = detect_media_type(name, body)
     sha256 = _hash_hex(body)
     blob = await db.get(Blob, sha256)
     if blob is None:
@@ -269,31 +272,43 @@ async def resource_items_for(
     其余文档类才用 <resource/> 标签让模型按需 load_files。
     """
     items: list[RunItem] = []
-    resolved = await resolve_resources(db, [ref.storage_key for ref in refs])
+    resolved = await resolve_resources(db, [ref.file_id for ref in refs])
     blobs = await _blobs_of(db, [record.blob_hash for record in resolved.values()])
     for ref in refs:
         try:
-            record = resolved.get(uuid.UUID(ref.storage_key))
+            record = resolved.get(uuid.UUID(ref.file_id))
         except ValueError:
             record = None
         if record is None or not is_owner_visible(record.owner_id, owner):
-            raise UnprocessableError(f"文件 {ref.storage_key} 不存在或已被删除")
+            raise UnprocessableError(f"文件 {ref.file_id} 不存在或已被删除")
         blob = blobs.get(record.blob_hash)
         media_type = record.content_type or "application/octet-stream"
         name = ref.name or record.name
         if media_type.startswith("image/"):
             items.append(
-                ImageItem(role="user", file_id=str(record.id), media_type=media_type, alt=name)
+                ImageItem(
+                    role="user",
+                    file_id=str(record.id),
+                    name=name,
+                    media_type=media_type,
+                    alt=name,
+                )
             )
         elif media_type.startswith("video/"):
             items.append(
-                VideoItem(role="user", file_id=str(record.id), media_type=media_type, alt=name)
+                VideoItem(
+                    role="user",
+                    file_id=str(record.id),
+                    name=name,
+                    media_type=media_type,
+                    alt=name,
+                )
             )
         else:
             items.append(
                 ResourceItem(
                     role="user",
-                    storage_key=str(record.id),
+                    file_id=str(record.id),
                     name=name,
                     media_type=media_type,
                     size=blob.size if blob is not None else 0,

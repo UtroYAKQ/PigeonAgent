@@ -12,11 +12,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.file_ref import FileIdRef
+from app.domain.file_ref import FileIdRef, FileRef
 from app.enums import ItemType
-
-# 工具结果 metadata 里指向被剥出媒体文件的键；工具登记、codec 回填共用
-MEDIA_FILE_ID_KEY = "media_file_id"
 
 USAGE_FIELDS = (
     "requests",
@@ -97,64 +94,46 @@ class TextItem(BaseItem):
     provider_details: dict[str, Any] | None = None
 
 
-class ImageItem(BaseItem):
-    type: Literal[ItemType.IMAGE] = ItemType.IMAGE
-    role: Literal["user", "assistant"] = "user"
-    url: str | None = None
-    # base64；二进制不参与检索列
-    data: str | None = None
-    # 对象存储引用（= FileRecord.id）：落库只存 key，回放时按需取字节
-    file_id: FileIdRef | None = None
-    media_type: str | None = None
-    alt: str | None = None
+class FileMediaItem(BaseItem):
+    """图片/视频/文件共用的引用头：只存对象存储引用，不存字节。"""
 
-    @model_validator(mode="after")
-    def _needs_payload(self) -> Self:
-        if not (self.url or self.data or self.file_id):
-            raise ValueError("image item needs url, data or file_id")
-        return self
-
-
-class VideoItem(BaseItem):
-    type: Literal[ItemType.VIDEO] = ItemType.VIDEO
-    role: Literal["user", "assistant"] = "user"
-    url: str | None = None
-    data: str | None = None
-    file_id: FileIdRef | None = None
-    media_type: str | None = None
-    alt: str | None = None
-
-    @model_validator(mode="after")
-    def _needs_payload(self) -> Self:
-        if not (self.url or self.data or self.file_id):
-            raise ValueError("video item needs url, data or file_id")
-        return self
-
-
-class FileItem(BaseItem):
-    """历史遗留的 base64 载体：只给前端展示，没有 file_id 就回放不进模型上下文。"""
-
-    type: Literal[ItemType.FILE] = ItemType.FILE
-    role: Literal["user", "assistant"] = "user"
-    name: str
+    file_id: FileIdRef
+    name: str = "file"
     media_type: str = "application/octet-stream"
-    data: str
     size: int = 0
 
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        legacy_key = data.get("storage_key")
+        if "file_id" not in data and isinstance(legacy_key, str):
+            data = {k: v for k, v in data.items() if k != "storage_key"}
+            data["file_id"] = legacy_key
+        if not data.get("name") and data.get("alt"):
+            data = {**data, "name": data["alt"]}
+        return data
 
-class ResourceItem(BaseItem):
-    """指向对象存储里一个文件的引用，本体不进消息：模型按 storage_key 取用。
 
-    - storage_key 就是 FileRecord 的 id（透明字符串，模型不解释）。
-    - 全面替代 FileItem 的角色：附件和产物都用它，前端渲染成可下载的 chip。
-    """
+class ImageItem(FileMediaItem):
+    type: Literal[ItemType.IMAGE] = ItemType.IMAGE
+    role: Literal["user", "assistant"] = "user"
+    # 画面描述（生成图就是 prompt）；文件名在 name
+    alt: str | None = None
+
+
+class VideoItem(FileMediaItem):
+    type: Literal[ItemType.VIDEO] = ItemType.VIDEO
+    role: Literal["user", "assistant"] = "user"
+    alt: str | None = None
+
+
+class ResourceItem(FileMediaItem):
+    """指向对象存储里一个文件的引用，本体不进消息：模型按 file_id 取用。"""
 
     type: Literal[ItemType.RESOURCE] = ItemType.RESOURCE
     role: Literal["user", "assistant"] = "user"
-    storage_key: str = Field(min_length=1, max_length=64)
-    name: str
-    media_type: str = "application/octet-stream"
-    size: int = 0
 
 
 class ThinkingItem(BaseItem):
@@ -183,6 +162,8 @@ class ToolResultItem(BaseItem):
     content: Any = None
     outcome: Literal["success", "failed", "denied", "interrupted", "retried"] = "success"
     metadata: Any = None
+    # 工具结果里被剥出的媒体引用；回放时按 file_id 取回字节
+    media: list[FileRef] = Field(default_factory=list)
 
 
 class ErrorItem(BaseItem):
@@ -258,7 +239,6 @@ RunItem = Annotated[
     TextItem
     | ImageItem
     | VideoItem
-    | FileItem
     | ResourceItem
     | ThinkingItem
     | ToolCallItem
@@ -274,11 +254,9 @@ RunItem = Annotated[
 PendingInterrupts = list[PendingInterrupt]
 
 
-def resource_tag(storage_key: str, name: str, media_type: str) -> str:
-    """resource 在上下文里的文本形状；模型照此理解，回复正文不要回显。"""
-    return (
-        f'<resource storage_key="{storage_key}" original_name="{name}" mime_type="{media_type}"/>'
-    )
+def resource_tag(file_id: str, name: str, media_type: str) -> str:
+    """resource 在上下文里的文本形状；storage_key 只作为该协议的属性名。"""
+    return f'<resource storage_key="{file_id}" original_name="{name}" mime_type="{media_type}"/>'
 
 
 def item_text(item: RunItem) -> str:
@@ -286,9 +264,7 @@ def item_text(item: RunItem) -> str:
     if isinstance(item, TextItem):
         return item.text
     if isinstance(item, (ImageItem, VideoItem)):
-        return item.alt or ("[图片]" if isinstance(item, ImageItem) else "[视频]")
-    if isinstance(item, FileItem):
-        return item.name
+        return item.alt or item.name or ("[图片]" if isinstance(item, ImageItem) else "[视频]")
     if isinstance(item, ResourceItem):
         return item.name
     if isinstance(item, ThinkingItem):

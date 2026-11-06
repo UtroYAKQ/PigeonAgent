@@ -22,7 +22,6 @@ from app.core.exceptions import ConfigurationError
 from app.db.types import dump_message, load_message
 from app.domain.run_items import (
     ApprovalRequestItem,
-    ImageItem,
     TextItem,
     TokenUsage,
     ToolCallItem,
@@ -192,26 +191,19 @@ def test_tool_return_media_round_trips() -> None:
     assert elements[2].url == "https://example.com/a.png"
 
 
-def test_imported_binary_without_file_id_is_display_only() -> None:
-    """导入路径拿不到 file_id：二进制只能展示，不能声称自己进上下文。"""
+def test_imported_media_without_file_id_is_ignored() -> None:
+    """导入路径拿不到 file_id：统一媒体模型下不再落 url/base64 形态。"""
     message = ModelRequest(
         parts=[UserPromptPart(content=["看图", BinaryContent(data=b"png", media_type="image/png")])]
     )
     items = codec.items_from_message(message)
-    image = next(item for item in items if isinstance(item, ImageItem))
-    assert image.in_context is False
+    assert [item.type for item in items] == ["text"]
 
 
-def test_model_file_part_becomes_display_media_item() -> None:
-    """模型直接产出的文件落成媒体 item，只给 UI 看，不参与上下文拼接。"""
+def test_model_file_parts_are_ignored_without_upload() -> None:
+    """模型原生二进制没有 file_id，不再以 base64 落库。"""
     part = FilePart(content=BinaryContent(data=b"abc", media_type="image/png"))
-
-    items = codec.items_from_response_part(part)
-
-    assert isinstance(items[0], ImageItem)
-    assert items[0].role == "assistant"
-    assert items[0].in_context is False
-    assert codec.messages_from_items(items) == []
+    assert codec.items_from_response_part(part) == []
 
 
 async def test_store_buffers_items_until_status_flush(

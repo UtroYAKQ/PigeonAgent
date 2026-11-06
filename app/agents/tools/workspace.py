@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import logging
-import mimetypes
 import uuid
 from pathlib import PurePosixPath
 from typing import Any
@@ -18,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.events import ArtifactEvent, ArtifactMedia
 from app.core.config import Settings
+from app.domain.media_type import detect_media_type
 from app.sandbox.workspace import RunWorkspace, SandboxWorkspace, WorkspaceError
 from app.services import file_service
 
@@ -99,7 +99,7 @@ def workspace_tools(
         except Exception as exc:
             return _fail("publish_file", exc)
         name = PurePosixPath(str(path).replace("\\", "/")).name or "file"
-        mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        mime = detect_media_type(name, data)
         try:
             async with factory() as db:
                 record = await file_service.direct_upload(
@@ -108,7 +108,7 @@ def workspace_tools(
         except Exception as exc:
             return _fail("publish_file", exc)
         media_type = record.content_type or mime
-        # 产物卡片由工具直接推给前端；进历史的 ResourceItem 仍由 turn 从工具结果派生
+        # 产物卡片由工具直接推给前端；ResourceItem 由 turn 从事件落库
         await ctx.emit(
             ArtifactEvent(
                 media=[
@@ -122,7 +122,7 @@ def workspace_tools(
             )
         )
         return {
-            "storage_key": str(record.id),
+            "file_id": str(record.id),
             "name": record.name,
             "size": record.size,
             "media_type": media_type,
@@ -165,19 +165,30 @@ def _fail(tool_name: str, exc: Exception) -> dict[str, Any]:
     return {"error": detail[:500]}
 
 
-def workspace_instructions() -> str:
-    """提示词里的资源约定段，追加在 agent instructions 后面。"""
-    return (
+def workspace_instructions(
+    *, include_workspace: bool = True, include_read_image: bool = True
+) -> str:
+    """提示词里的资源约定段；只描述本轮真正挂载的工具，避免说明和工具对不上。"""
+    if not include_workspace and not include_read_image:
+        return ""
+    parts = [
         "## 文件资源\n"
         "会话里的文件、图片和视频都以 "
         '<resource storage_key=".." original_name=".." mime_type=".."/> 表示：'
-        "storage_key 是取用凭据，original_name 是给用户的文件名。"
-        "用户直接上传的图片已经能看见；其他图片（工具产物、工作区文件）用 read_image 读取，"
-        "传 storage_key 或工作区相对路径，不要用 read_file 读图片。"
-        "要把文件（含图片/视频）落进本轮工作区处理，"
-        "先调 load_files（把 storage_key 传进去），"
-        "它会以 original_name 落进工作区，之后的 write_file / read_file 都用相对路径。"
-        "工作区里的文件不会自动出现在会话里；只有调用 publish_file 才会上传成可下载的产物，"
-        "所以需要交付的文件要主动发布。回答正文不要回显 <resource/> 标签，直接说文件名即可。"
-        "需要看文本内容时用 read_file 范围读取。"
-    )
+        "storage_key 是取用凭据，也是文件记录的 file_id；original_name 是给用户的文件名。"
+    ]
+    if include_read_image:
+        parts.append(
+            "用户直接上传的图片已经能看见；其他图片（工具产物、工作区文件）用 read_image 读取，"
+            "传 file_id（resource 标签里的 storage_key）或工作区相对路径，不要用 read_file 读图片。"
+        )
+    if include_workspace:
+        parts.append(
+            "要把文件（含图片/视频）落进本轮工作区处理，"
+            "先调 load_files（把 storage_key 传进去），"
+            "它会以 original_name 落进工作区，之后的 write_file / read_file 都用相对路径。"
+            "工作区里的文件不会自动出现在会话里；只有调用 publish_file 才会上传成可下载的产物，"
+            "所以需要交付的文件要主动发布。需要看文本内容时用 read_file 范围读取。"
+        )
+    parts.append("回答正文不要回显 <resource/> 标签，直接说文件名即可。")
+    return "".join(parts)

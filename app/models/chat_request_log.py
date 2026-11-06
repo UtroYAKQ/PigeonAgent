@@ -17,10 +17,6 @@ from app.db import Base
 from app.db.types import PydanticJson
 from app.domain.run_items import TokenUsage
 
-# turn = 新的一轮；resume = 补跑被中断的工具调用
-TURN = "turn"
-RESUME = "resume"
-
 
 class ChatRequestLog(Base):
     __tablename__ = "chat_request_logs"
@@ -37,7 +33,6 @@ class ChatRequestLog(Base):
         ForeignKey("sessions.id", ondelete="SET NULL")
     )
     run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
-    kind: Mapped[str] = mapped_column(String(16), default=TURN, server_default=text("'turn'"))
     # completed | interrupted | failed | cancelled | running
     status: Mapped[str] = mapped_column(
         String(16), default="running", server_default=text("'running'")

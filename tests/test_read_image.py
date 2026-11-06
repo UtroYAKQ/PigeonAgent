@@ -18,12 +18,8 @@ from app import codec
 from app.agents.tools.image import make_read_image
 from app.agents.turn import AgentTurn, _reported_tool_outcome
 from app.core.config import Settings
-from app.domain.run_items import (
-    MEDIA_FILE_ID_KEY,
-    ImageItem,
-    ToolCallItem,
-    ToolResultItem,
-)
+from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
+from app.domain.run_items import ImageItem, ToolCallItem, ToolResultItem
 from app.models.file_record import FileRecord
 from app.sandbox.workspace import LocalWorkspace
 from app.services import file_service
@@ -69,13 +65,13 @@ async def test_read_image_by_storage_key_returns_reference_and_bytes(
 
     assert isinstance(result, ToolReturn)
     reference, image = result.return_value
-    assert reference["storage_key"] == str(record.id)
+    assert reference["file_id"] == str(record.id)
     assert reference["name"] == "pic.png"
     assert reference["media_type"] == "image/png"
     assert reference["size"] == len(PNG)
     assert isinstance(image, BinaryContent)
     assert image.data == PNG and image.media_type == "image/png"
-    assert result.metadata[MEDIA_FILE_ID_KEY] == str(record.id)
+    assert [ref["file_id"] for ref in result.metadata[TOOL_MEDIA_METADATA_KEY]] == [str(record.id)]
 
 
 async def test_read_image_rejects_non_image_and_foreign_file(
@@ -128,7 +124,7 @@ async def test_read_image_path_uploads_once_and_returns_reference(
     assert isinstance(image, BinaryContent)
 
     async with db_session_factory() as db:
-        record = await db.get(FileRecord, uuid.UUID(reference["storage_key"]))
+        record = await db.get(FileRecord, uuid.UUID(reference["file_id"]))
         assert record is not None
         assert record.owner_id == owner and record.name == "chart.png"
 
@@ -156,21 +152,20 @@ async def test_read_image_path_rejects_non_image_and_traversal(
     assert "非法路径" in error or "不在工作区" in error
 
 
-def test_stripped_tool_media_round_trips_by_metadata() -> None:
+def test_stripped_tool_media_round_trips_by_media_field() -> None:
     file_id = str(uuid.uuid4())
+    ref = FileRef(file_id=file_id, name="pic.png", media_type="image/png", size=len(PNG))
     part = ToolReturnPart(
         tool_name="read_image",
         tool_call_id="call_1",
-        content=[
-            {"storage_key": file_id, "name": "pic.png", "media_type": "image/png"},
-            BinaryContent(data=PNG, media_type="image/png"),
-        ],
-        metadata={MEDIA_FILE_ID_KEY: file_id, "name": "pic.png", "media_type": "image/png"},
+        content=[ref.model_dump(), BinaryContent(data=PNG, media_type="image/png")],
+        metadata={TOOL_MEDIA_METADATA_KEY: [ref.model_dump()]},
     )
 
     item = codec.tool_result_item(part)
+    assert [media.file_id for media in item.media] == [file_id]
     item.content = codec.without_binary_media(item.content)
-    assert item.content == [{"storage_key": file_id, "name": "pic.png", "media_type": "image/png"}]
+    assert item.content == [ref.model_dump()]
 
     without_media = codec.messages_from_items([item])[0].parts[0]
     assert isinstance(without_media, ToolReturnPart)
@@ -185,15 +180,13 @@ def test_stripped_tool_media_round_trips_by_metadata() -> None:
 
 async def test_turn_persists_reference_without_base64() -> None:
     file_id = str(uuid.uuid4())
+    ref = FileRef(file_id=file_id, name="pic.png", media_type="image/png", size=len(PNG))
     event = FunctionToolResultEvent(
         part=ToolReturnPart(
             tool_name="read_image",
             tool_call_id="call_1",
-            content=[
-                {"storage_key": file_id, "name": "pic.png", "media_type": "image/png"},
-                BinaryContent(data=PNG, media_type="image/png"),
-            ],
-            metadata={MEDIA_FILE_ID_KEY: file_id},
+            content=[ref.model_dump(), BinaryContent(data=PNG, media_type="image/png")],
+            metadata={TOOL_MEDIA_METADATA_KEY: [ref.model_dump()]},
         )
     )
     store = _RecordingStore()
@@ -203,8 +196,9 @@ async def test_turn_persists_reference_without_base64() -> None:
 
     [item] = store.appended
     assert isinstance(item, ToolResultItem)
-    assert item.content == [{"storage_key": file_id, "name": "pic.png", "media_type": "image/png"}]
-    assert item.metadata == {MEDIA_FILE_ID_KEY: file_id}
+    assert item.content == [ref.model_dump()]
+    assert [media.file_id for media in item.media] == [file_id]
+    assert item.metadata is None
 
     reported = _reported_tool_outcome(event)
     assert isinstance(reported.part.content, list)
@@ -245,10 +239,16 @@ async def test_build_context_skips_display_only_media(
         session_id,
         run_id=uuid.uuid4(),
         content=[
-            ImageItem(role="user", file_id=visible_id, media_type="image/png"),
+            ImageItem(
+                role="user",
+                file_id=visible_id,
+                name="a.png",
+                media_type="image/png",
+            ),
             ImageItem(
                 role="assistant",
                 file_id=hidden_id,
+                name="b.png",
                 media_type="image/png",
                 in_context=False,
             ),
@@ -283,8 +283,22 @@ async def test_build_context_rehydrates_tool_result_media(
             ToolResultItem(
                 tool_call_id="call_1",
                 tool_name="read_image",
-                content=[{"storage_key": str(record.id), "name": "pic.png"}],
-                metadata={MEDIA_FILE_ID_KEY: str(record.id)},
+                content=[
+                    FileRef(
+                        file_id=str(record.id),
+                        name="pic.png",
+                        media_type="image/png",
+                        size=len(PNG),
+                    ).model_dump()
+                ],
+                media=[
+                    FileRef(
+                        file_id=str(record.id),
+                        name="pic.png",
+                        media_type="image/png",
+                        size=len(PNG),
+                    )
+                ],
             ),
         ],
         parent_run_id=chat_session.active_leaf_run_id,

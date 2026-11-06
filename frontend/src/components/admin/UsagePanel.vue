@@ -249,7 +249,6 @@ onMounted(() => loadCurrent(true))
                   <TableCell class="px-4 py-2.5">
                     <div class="flex min-w-0 items-center gap-2">
                       <span class="truncate text-xs">{{ log.model_name || '—' }}</span>
-                      <Badge v-if="log.kind === 'resume'" variant="outline" class="shrink-0 font-normal text-[10px]">恢复</Badge>
                     </div>
                   </TableCell>
                   <TableCell class="px-4 py-2.5 text-right font-mono text-xs tabular-nums">

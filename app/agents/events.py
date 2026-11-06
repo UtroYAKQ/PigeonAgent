@@ -64,7 +64,8 @@ class CompactionResultEvent(CustomEvent):
 class ImageGeneratedEvent(CustomEvent):
     """出图工具每上传完一张发一次；turn 落 ImageItem，前端直接渲染。"""
 
-    storage_key: str
+    file_id: str
+    # CustomEvent 的 name 被事件注册名占用，事件里只能叫 file_name
     file_name: str
     media_type: str
     size: int = 0
