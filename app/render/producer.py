@@ -25,6 +25,10 @@ class RenderProducer:
     async def publish(self, event: BaseEvent) -> None:
         await self._queue.publish(event)
 
+    async def touch(self) -> None:
+        """run 租约心跳时顺手续期活跃标记。"""
+        await self._hub.touch(self._session_id, self._queue.run_id)
+
     async def close(self) -> None:
         if self._closed:
             return

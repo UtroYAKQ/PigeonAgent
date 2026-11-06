@@ -90,7 +90,7 @@ async def test_sse_resumes_from_last_event_id(
             headers={"Last-Event-ID": "1"},
         )
     )
-    await asyncio.sleep(0.05)
+    await asyncio.sleep(1.0)
     await producer.close()
     response = await request
 

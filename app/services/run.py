@@ -23,7 +23,12 @@ from app.agents.tools import frontend_toolset, web_search_tools, workspace_instr
 from app.agents.tools.workspace import workspace_tools
 from app.agents.turn import summarize_error
 from app.core.config import Settings, get_settings
-from app.core.exceptions import NotFoundError, StorageUnavailableError, UnprocessableError
+from app.core.exceptions import (
+    NotFoundError,
+    ServiceUnavailableError,
+    StorageUnavailableError,
+    UnprocessableError,
+)
 from app.db.session import SessionFactory
 from app.domain.run_items import ResourceItem, RunItem
 from app.enums import RunStatus
@@ -44,6 +49,7 @@ from app.schemas.run import RunCreate, RunResume
 from app.services import billing, chat_log, credit_guard, file_service, run_store
 from app.services import chat_session as session_service
 from app.services import image_model as image_model_service
+from app.services.run_control import RunControl
 from app.services.run_store import RUN_LEASE_SECONDS, ResumeDecisions
 
 logger = logging.getLogger(__name__)
@@ -51,10 +57,25 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RunRegistry:
-    """运行任务与取消令牌的注册表；随 app.state 生命周期存在。"""
+    """运行任务与取消令牌的注册表；配置 Redis 后取消信号走跨 worker 广播。"""
 
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
     cancellations: dict[str, tuple[UUID, CancellationToken]] = field(default_factory=dict)
+    control: RunControl | None = None
+    _started: bool = False
+
+    async def start(self) -> None:
+        if self._started:
+            return
+        self._started = True
+        if self.control is not None:
+            self.control.set_handler(self._cancel_local)
+            self.control.set_ready_handler(self._reconcile_cancels)
+            await self.control.start()
+
+    async def wait_ready(self, seconds: float = 2.0) -> None:
+        if self.control is not None:
+            await self.control.wait_ready(seconds)
 
     def schedule(self, coro: Coroutine[Any, Any, None]) -> None:
         task = asyncio.create_task(coro)
@@ -78,6 +99,35 @@ class RunRegistry:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        run_ids = list(self.cancellations)
+        if run_ids:
+            await asyncio.gather(*(self.unregister(run_id) for run_id in run_ids))
+
+    async def aclose(self) -> None:
+        await self.cancel_all()
+        if self.control is not None:
+            await self.control.aclose()
+
+    def _cancel_local(self, run_id: str, session_id: UUID) -> None:
+        local = self.cancellations.get(run_id)
+        if local is not None and local[0] == session_id:
+            local[1].cancel()
+            logger.info("Run %s cancelled from another worker", run_id)
+
+    async def _reconcile_cancels(self) -> None:
+        """listener 重连后补查取消标记，捞回断线期间丢掉的 Pub/Sub 消息。"""
+        control = self.control
+        if control is None:
+            return
+        for run_id, (_session_id, token) in list(self.cancellations.items()):
+            try:
+                requested = await control.cancel_requested(run_id)
+            except Exception:
+                logger.exception("Failed to reconcile cancel flag for run %s", run_id)
+                continue
+            if requested:
+                token.cancel()
+                logger.info("Run %s cancelled from a durable cancel flag", run_id)
 
 
 async def launch_run(
@@ -185,7 +235,7 @@ async def launch_run(
         raise
 
     cancellation_token = CancellationToken()
-    registry.cancellations[run_id] = (session_id, cancellation_token)
+    await registry.register(run_id, session_id, cancellation_token)
     registry.schedule(
         execute_run(
             producer=producer,
@@ -356,7 +406,7 @@ async def execute_run(
             with contextlib.suppress(asyncio.CancelledError):
                 await cancellation_watcher
         if registry is not None:
-            registry.cancellations.pop(run_id, None)
+            await registry.unregister(run_id)
         final_status = await _final_status(session_factory, session_id, run_uuid)
         await _shutdown_workspace(
             workspace,

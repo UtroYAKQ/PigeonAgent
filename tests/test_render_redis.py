@@ -218,3 +218,37 @@ async def test_publish_after_close_is_rejected() -> None:
 
     with pytest.raises(RuntimeError):
         await producer.publish(RunFinishedEvent(thread_id=str(SESSION_ID), run_id="run-closed"))
+
+
+async def test_touch_renews_active_and_owner_ttl() -> None:
+    """长工具调用不产生事件时，心跳也要把互斥标记续上。"""
+    client = FakeAsyncRedis()
+    prefix = f"test-{uuid4().hex[:8]}"
+    hub = build_hub(client, prefix=prefix)
+    producer = await hub.create(SESSION_ID, "run-touch")
+    active_key = f"{prefix}:active:{SESSION_ID}"
+    owner_key = f"{prefix}:owner:run-touch"
+    assert 0 < int(await client.ttl(active_key)) <= 600
+
+    await client.expire(active_key, 10)
+    await client.expire(owner_key, 10)
+    await producer.touch()
+    assert int(await client.ttl(active_key)) > 10
+    assert int(await client.ttl(owner_key)) > 10
+    await producer.close()
+
+
+async def test_touch_recreates_markers_after_redis_restart() -> None:
+    """Redis 重启丢键后，心跳能把 active/owner 补回来，SSE 和取消都不至于失联。"""
+    client = FakeAsyncRedis()
+    prefix = f"test-{uuid4().hex[:8]}"
+    hub = build_hub(client, prefix=prefix)
+    producer = await hub.create(SESSION_ID, "run-recover")
+    active_key = f"{prefix}:active:{SESSION_ID}"
+    owner_key = f"{prefix}:owner:run-recover"
+    await client.delete(active_key, owner_key)
+
+    await producer.touch()
+    assert await client.get(active_key) == b"run-recover"
+    assert await client.get(owner_key) == str(SESSION_ID).encode()
+    await producer.close()

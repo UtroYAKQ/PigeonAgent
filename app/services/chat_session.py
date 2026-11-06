@@ -3,11 +3,13 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings
 from app.core.exceptions import NotFoundError, UnprocessableError
 from app.enums import SessionStatus, ThinkingLevel
 from app.models.llm_model import LlmModel
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
+from app.sandbox.workspace import purge_session_workspace
 from app.schemas.session import SessionCreate, SessionUpdate
 from app.services import session_group
 
@@ -125,10 +127,14 @@ async def mark_session_read(db: AsyncSession, session_id: UUID, *, owner_id: UUI
     return chat_session
 
 
-async def delete_session(db: AsyncSession, session_id: UUID, *, owner_id: UUID) -> None:
+async def delete_session(
+    db: AsyncSession, session_id: UUID, *, owner_id: UUID, settings: Settings
+) -> None:
     chat_session = await get_session_or_404(db, session_id, owner_id=owner_id)
     await db.delete(chat_session)
     await db.commit()
+    # 会话级副作用跟着删除动作走，避免其他删除入口漏掉本地工作区回收
+    await purge_session_workspace(settings, session_id)
 
 
 async def _validate_group(db: AsyncSession, group_id: int | None, *, owner_id: UUID) -> None:

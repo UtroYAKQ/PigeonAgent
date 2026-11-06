@@ -68,3 +68,15 @@ async def test_enforce_names_the_action_in_429() -> None:
         assert error.extra["retry_after"] > 0
     else:
         raise AssertionError("超出窗口上限应当抛 429")
+
+
+async def test_redis_failure_falls_back_to_local_window() -> None:
+    """Redis 黑洞时认证接口不能跟着挂；降级到进程内窗口，至少保留单 worker 限流。"""
+
+    class BrokenRedis:
+        async def incr(self, _name: str) -> int:
+            raise RuntimeError("redis is down")
+
+    limiter = RateLimiter(redis_client=BrokenRedis())  # type: ignore[arg-type]
+    assert await limiter.retry_after(KEY, 1, 60) == 0
+    assert await limiter.retry_after(KEY, 1, 60) >= 1

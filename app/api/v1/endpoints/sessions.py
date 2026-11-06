@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUserDep, SessionDep, SettingsDep
 from app.enums import SessionStatus
 from app.models.session import ChatSession
-from app.sandbox.workspace import purge_session_workspace
 from app.schemas.run import PendingBatchRead
 from app.schemas.session import (
     LeafSwitch,
@@ -82,9 +81,7 @@ async def update_session(
 async def delete_session(
     session_id: UUID, db: SessionDep, user: CurrentUserDep, settings: SettingsDep
 ) -> None:
-    await session_service.delete_session(db, session_id, owner_id=user.id)
-    # 本地模式的工作区目录按会话存，会话没了目录就该回收（沙箱那边由 pool 负责）
-    await purge_session_workspace(settings, session_id)
+    await session_service.delete_session(db, session_id, owner_id=user.id, settings=settings)
 
 
 @router.post("/{session_id}/read", response_model=SessionRead)

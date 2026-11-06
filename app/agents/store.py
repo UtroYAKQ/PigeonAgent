@@ -6,7 +6,6 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
-from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic_ai.messages import ModelMessage
@@ -56,17 +55,7 @@ class SessionStore:
         self._buffer_items: list[RunItem] = []
         self._buffer_usage: TokenUsage | None = None
         self._flush_lock = asyncio.Lock()
-        # 工具内部（图片生成等）没法 yield，只能把 UI 事件挂回这一层，由 turn 取走
-        self._emitter: Callable[[Any], None] | None = None
         self._on_usage = on_usage
-
-    def bind_emitter(self, emitter: Callable[[Any], None]) -> None:
-        """由 AgentTurn 在开跑前挂上；工具通过 emit 把事件送进它的 outbox。"""
-        self._emitter = emitter
-
-    def emit(self, event: Any) -> None:
-        if self._emitter is not None:
-            self._emitter(event)
 
     def begin_run(self) -> None:
         """直接对话的下一次 turn 需要新的 run_id；HTTP run 的 id 是固定的。"""

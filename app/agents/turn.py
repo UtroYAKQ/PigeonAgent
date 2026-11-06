@@ -61,6 +61,7 @@ from app.agents.events import (
     CallRequestEvent,
     CompactionResultEvent,
     CompactionStartEvent,
+    ImageGeneratedEvent,
     RunCancelledEvent,
     RunFailedEvent,
     RunUsageEvent,
@@ -74,6 +75,7 @@ from app.domain.run_items import (
     CallRequestItem,
     CompactionItem,
     ErrorItem,
+    ImageItem,
     RunItem,
     TextItem,
     ThinkingItem,
@@ -129,8 +131,6 @@ class AgentTurn:
     async def events(self) -> AsyncIterator[TurnEventType]:
         await self._store.flush()
         self._store.begin_run()
-        # 工具内部出的 UI 事件（图片等）走这条路回到事件流里
-        self._store.bind_emitter(self._outbox.append)
         current = await self._store.ensure_run(self._user_input)
         async for custom_event in self._compaction_events(current):
             await self._handle_record_event(custom_event)
@@ -332,6 +332,22 @@ class AgentTurn:
         elif isinstance(event.part, ToolCallPart):
             self._partial_tools.pop(event.part.tool_call_id, None)
 
+    async def _on_image_generated(self, event: ImageGeneratedEvent) -> None:
+        """出图工具只发事件；ImageItem 的落库仍统一由 turn 负责。"""
+        await self._store.append_items(
+            [
+                ImageItem(
+                    role="assistant",
+                    file_id=event.storage_key,
+                    media_type=event.media_type,
+                    alt=event.alt,
+                    in_context=False,
+                )
+            ]
+        )
+        # 逐张落库，取消或失败时已出的图不会丢
+        await self._store.flush()
+
     async def _on_tool_result(self, event: ToolResultEvent) -> None:
         turn_items: list[RunItem] = [codec.tool_result_item(event.part)]
         published = codec.published_resource(event.part)
@@ -340,7 +356,7 @@ class AgentTurn:
         await self._store.append_items(turn_items)
         if published is not None:
             # 落库之后再推事件：前端拿到卡片时数据已经在了，刷新也不会丢
-            self._store.emit(
+            self._outbox.append(
                 ArtifactEvent(
                     media=[
                         {
@@ -393,6 +409,7 @@ class AgentTurn:
         PartStartEvent: _on_part_start,
         PartDeltaEvent: _on_part_delta,
         PartEndEvent: _on_part_end,
+        ImageGeneratedEvent: _on_image_generated,
         ToolResultEvent: _on_tool_result,
         ApprovalRequestEvent: _on_approval_request,
         CallRequestEvent: _on_call_request,

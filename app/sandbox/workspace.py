@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from app.core.config import Settings
-from app.infra.file_records import resolve_resources
+from app.infra.file_records import resolve_owned_resources
 from app.infra.storage import ObjectStorage, safe_name
 from app.models.blob import Blob
 from app.models.file_record import FileRecord
@@ -35,6 +35,8 @@ _MAX_LOAD_BATCH = 10
 _MAX_LIST_ENTRIES = 500
 _MAX_COMMAND_OUTPUT = 16_000
 _DEFAULT_FILES_DIR = "/home/user/pigeon"
+# 从后端把文件写进 envd 的整请求上限；默认 60s 对慢网络下的大文件偏紧。
+_SANDBOX_WRITE_TIMEOUT_SECONDS = 180
 
 logger = logging.getLogger(__name__)
 
@@ -160,11 +162,7 @@ async def _materialize_load_batch(
     两种工作区只有「字节落到哪」不同（本地写目录 / 沙箱推远端），其余逐字一致，
     差异收进 persist 回调；persist 返回这一条 key 的成功或失败条目。
     """
-    resolved = {
-        record_id: record
-        for record_id, record in (await resolve_resources(db, keys)).items()
-        if record.owner_id == owner_id
-    }
+    resolved = await resolve_owned_resources(db, keys, owner_id=owner_id)
     entries: list[dict[str, Any]] = []
     for key in keys[:_MAX_LOAD_BATCH]:
         key = key.strip()
@@ -363,18 +361,32 @@ class SandboxWorkspace(RunWorkspace):
 
         async def persist(key: str, record: FileRecord, blob: Blob) -> dict[str, Any]:
             name = safe_name(record.name)
-            # 沙箱不一定连得上对象存储（本地 MinIO / 内网端点），字节走后端中转
+            target = self._abs(name)
             try:
                 data = await self.storage.get(blob.storage_key)
-                await sandbox.files.write(self._abs(name), data)
             except Exception as exc:
-                logger.exception("Sandbox download failed for %s in run %s", key, self.run_id)
-                return {"storage_key": key, "error": f"下载到沙箱失败：{exc}"[:300]}
+                logger.exception("Sandbox storage read failed for %s in run %s", key, self.run_id)
+                return {
+                    "storage_key": key,
+                    "error": f"读取对象存储失败：{exc.__class__.__name__}",
+                }
+            try:
+                await sandbox.files.write(
+                    target,
+                    data,
+                    request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                logger.exception("Sandbox write failed for %s in run %s", key, self.run_id)
+                return {
+                    "storage_key": key,
+                    "error": f"写入沙箱失败：{exc.__class__.__name__}",
+                }
             return {
                 "storage_key": key,
                 "original_name": record.name,
                 "saved_as": name,
-                "size": len(data),
+                "size": blob.size,
             }
 
         return await _materialize_load_batch(db, keys, owner_id, persist)

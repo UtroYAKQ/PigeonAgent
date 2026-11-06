@@ -36,7 +36,8 @@ PigeonAgent 是一个可以调用模型、执行工具和访问对象存储的�
 - 生产环境使用 HTTPS；`S3_PUBLIC_ENDPOINT_URL` 也必须使用 HTTPS。
 - 不要对公网暴露对象存储管理端口（例如 RustFS 的 9001）和 PostgreSQL / Redis 端口。
 - 按需设置 `CORS_ORIGINS`，不要使用通配符。
+- 使用仓库里的 `deploy/nginx.conf` 安全头。HTML 预览需要执行模型生成的内联脚本，所以 CSP 的 `script-src` 保留了 `'unsafe-inline'`；预览 iframe 仍由 sandbox 隔离。如果不需要预览，可以收紧回 `'self'`。
 - 只给管理员开放 `/admin` 相关接口；定期检查操作日志。
 - 如果启用沙箱或联网工具，限制其网络出口和可访问范围。
-- 定期升级依赖；Python 依赖用 `uv lock --upgrade` 后跑完整测试，前端用 `npm audit` / Dependabot 跟踪。
+- 定期升级依赖；Python 依赖用 `uv lock --upgrade` 后跑完整测试，前端用 `npm audit` 手动检查。
 - 备份数据库和对象存储；`SECRET_KEY` 单独保管，丢失后加密配置无法恢复。

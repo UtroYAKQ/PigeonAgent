@@ -106,15 +106,19 @@ class BaseAgent:
             tools.append(
                 Tool(
                     make_generate_image(
-                        self._store,
                         self._session_factory,
                         owner_id=self._owner_id,
                         settings=self._settings,
+                        run_id=self._current_run_id,
                         image_model_id=self._image_model_id,
                     )
                 )
             )
         return tools
+
+    def _current_run_id(self) -> UUID | None:
+        # 直接对话每轮都会换 run_id，工具必须在调用时取，不能在构造期固化
+        return self._store.run_uuid if self._store is not None else None
 
     def build_instructions(self, prompt: str | None) -> str:
         return "\n\n".join(part for part in (self.instructions, prompt) if part)

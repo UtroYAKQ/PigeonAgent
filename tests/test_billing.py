@@ -216,13 +216,18 @@ async def test_charge_images(db_session: AsyncSession) -> None:
     db_session.add(model)
     await db_session.commit()
     settings = _settings(credit_default_per_image=20.0)
+    run_id = uuid4()
 
     charged = await billing.charge_images(
-        db_session, settings, user_id=user.id, model=model, count=2, run_id=uuid4()
+        db_session, settings, user_id=user.id, model=model, count=2, run_id=run_id
     )
     assert charged == 40
     refreshed = await db_session.get(User, TEST_USER_ID)
     assert refreshed is not None and refreshed.credits_balance == 60
+
+    totals = await billing.run_charge_totals(db_session, run_id)
+    assert totals.credits == 40
+    assert totals.images == 2
 
     # 开关关掉就一分不扣
     assert (

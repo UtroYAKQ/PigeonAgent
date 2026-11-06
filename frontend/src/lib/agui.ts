@@ -3,6 +3,31 @@
 import type { AgUiEvent, LiveMedia, LiveRun, TokenUsage } from '@/types/api'
 import { encryptedToolOutcome } from '@/lib/toolOutcome'
 
+/** 连续到达的生成图片并进同一个块，一次生成多张就是一张网格。 */
+function appendGeneratedImage(live: LiveRun, value: unknown): void {
+  if (!value || typeof value !== 'object') return
+  const raw = value as Record<string, unknown>
+  const fileId = typeof raw.storage_key === 'string' ? raw.storage_key : ''
+  if (!fileId) return
+  const media: LiveMedia = {
+    file_id: fileId,
+    media_type: typeof raw.media_type === 'string' ? raw.media_type : 'image/png',
+    name: typeof raw.file_name === 'string' ? raw.file_name : 'image',
+    size: typeof raw.size === 'number' ? raw.size : 0,
+    alt: typeof raw.alt === 'string' ? raw.alt : null,
+    origin: 'generated',
+  }
+  const last = live.blocks[live.blocks.length - 1]
+  if (last?.kind === 'artifact' && last.media) last.media.push(media)
+  else {
+    live.blocks.push({
+      id: `artifact-${media.file_id}`,
+      kind: 'artifact',
+      media: [media],
+    })
+  }
+}
+
 export function applyAgUiEvent(live: LiveRun, event: AgUiEvent): void {
   switch (event.type) {
     case 'RUN_STARTED':
@@ -116,6 +141,8 @@ export function applyAgUiEvent(live: LiveRun, event: AgUiEvent): void {
       if (event.name === 'run_usage') {
         const value = event.value as { usage?: TokenUsage } | null
         if (value?.usage) live.usage = value.usage
+      } else if (event.name === 'image_generated') {
+        appendGeneratedImage(live, event.value)
       } else if (event.name === 'artifact') {
         const value = event.value as { media?: LiveMedia[] } | null
         const media = value?.media ?? []

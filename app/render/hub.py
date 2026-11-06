@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -166,6 +167,34 @@ class RenderHub:
             return False
         requested = await self._redis.get(self._key(f"cancel:{run_id}"))
         return _as_text(requested) == str(session_id)
+
+    async def touch(self, session_id: UUID, run_id: str) -> None:
+        """长工具调用期间续期 active/owner 标记；没有事件也能保住互斥。"""
+        if self._redis is None:
+            return
+        async with asyncio.timeout(TOUCH_TIMEOUT_SECONDS):
+            active_key = self._key(f"active:{session_id}")
+            active = _as_text(await self._redis.get(active_key))
+            if active is not None and active != run_id:
+                return
+            async with self._redis.pipeline(transaction=False) as pipe:
+                # active 匹配（或 Redis 重启后丢失）时把两个键补/续上；
+                # active 丢失时用 NX，避免和刚抢到会话的新 run 互相覆盖。
+                pipe.set(
+                    self._key(f"owner:{run_id}"),
+                    str(session_id),
+                    ex=ACTIVE_RUN_TTL_SECONDS,
+                )
+                if active is None:
+                    pipe.set(
+                        active_key,
+                        run_id,
+                        nx=True,
+                        ex=ACTIVE_RUN_TTL_SECONDS,
+                    )
+                else:
+                    pipe.expire(active_key, ACTIVE_RUN_TTL_SECONDS)
+                await pipe.execute()
 
     async def aclose(self) -> None:
         if self._redis is not None:

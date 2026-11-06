@@ -59,6 +59,12 @@ class StorageUnavailableError(AppError):
     status_code = 503
 
 
+class ServiceUnavailableError(AppError):
+    """共享控制面（Redis 等）暂时不可用；调用方稍后重试即可。"""
+
+    status_code = 503
+
+
 class MailDeliveryError(AppError):
     """SMTP 拒收/连不上；验证码仍在库里，但绝不能对前端说已发送。"""
 

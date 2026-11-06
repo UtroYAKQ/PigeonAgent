@@ -175,7 +175,7 @@ class _FakeFormats:
     async def make_dir(self, path: str) -> None:
         self.objects.append({"path": path})
 
-    async def write(self, path: str, data: bytes) -> None:
+    async def write(self, path: str, data: bytes, request_timeout: float | None = None) -> None:
         self.written[path] = data
 
     async def read(self, path: str, format: str = "text") -> bytes:
@@ -191,14 +191,21 @@ class _FakeFormats:
 
 
 class _FakeCommands:
+    def __init__(self, exit_code: int = 0) -> None:
+        self.exit_code = exit_code
+        self.calls: list[dict[str, Any]] = []
+
     async def run(self, command: str, cwd: str | None = None, timeout: float = 60) -> Any:  # noqa: ASYNC109
-        return SimpleNamespace(exit_code=0, stdout="did run", stderr="")
+        self.calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+        return SimpleNamespace(exit_code=self.exit_code, stdout="did run", stderr="")
 
 
 class _FakeSandbox:
     sandbox_id = "sbx-fake-1"
-    files = _FakeFormats()
-    commands = _FakeCommands()
+
+    def __init__(self) -> None:
+        self.files = _FakeFormats()
+        self.commands = _FakeCommands()
 
     async def beta_pause(self) -> None:
         self.paused = True
@@ -207,15 +214,22 @@ class _FakeSandbox:
         self.killed = True
 
 
-def _record(db_session: AsyncSession, name: str, body: bytes) -> FileRecord:
+def _record(
+    db_session: AsyncSession,
+    name: str,
+    body: bytes,
+    *,
+    owner_id: uuid.UUID | None = None,
+) -> FileRecord:
     digest = uuid.uuid4().hex + uuid.uuid4().hex
     db_session.add(Blob(hash_id=digest, size=len(body), storage_key=f"blobs/{uuid.uuid4().hex}"))
-    record = FileRecord(name=name, blob_hash=digest, content_type="text/plain")
+    record = FileRecord(name=name, blob_hash=digest, content_type="text/plain", owner_id=owner_id)
     db_session.add(record)
     return record
 
 
-async def test_sandbox_resolve_keys_pushes_bytes(db_session: AsyncSession) -> None:
+async def test_sandbox_resolve_keys_writes_storage_bytes(db_session: AsyncSession) -> None:
+    """load_files 从对象存储取字节，再经 files.write 推到 envd。"""
     body = "文件内容".encode()
     record = _record(db_session, "说明.txt", body)
     await db_session.commit()
@@ -226,27 +240,60 @@ async def test_sandbox_resolve_keys_pushes_bytes(db_session: AsyncSession) -> No
     await storage.put(blob.storage_key, body, None)
 
     sandbox = _FakeSandbox()
-    sandbox.files = _FakeFormats()
     ws = SandboxWorkspace(storage, uuid.uuid4(), "run-3", sandbox)
     entries = await ws.resolve_keys(db_session, [str(record.id), "not-a-uuid"])
 
     assert entries[0]["saved_as"] == "说明.txt"
     assert entries[0]["size"] == len(body)
-    assert sandbox.files.written[f"{ws.root}/说明.txt"] == body
+    assert sandbox.files.written == {f"{ws.root}/说明.txt": body}
+    assert sandbox.commands.calls == []
     assert "error" in entries[1]
 
 
-async def test_sandbox_resolve_keys_reports_download_failure(db_session: AsyncSession) -> None:
-    body = b"gone"
-    record = _record(db_session, "missing.txt", body)
+async def test_sandbox_resolve_keys_reports_storage_failure(db_session: AsyncSession) -> None:
+    record = _record(db_session, "missing.txt", b"gone")
     await db_session.commit()
 
     sandbox = _FakeSandbox()
-    sandbox.files = _FakeFormats()
     ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-4", sandbox)
     entries = await ws.resolve_keys(db_session, [str(record.id)])
 
-    assert "下载到沙箱失败" in entries[0]["error"]
+    assert "读取对象存储失败" in entries[0]["error"]
+    assert sandbox.files.written == {}
+
+
+class _BrokenFiles(_FakeFormats):
+    async def write(self, path: str, data: bytes, request_timeout: float | None = None) -> None:
+        raise OSError("envd down")
+
+
+async def test_sandbox_resolve_keys_reports_write_failure(db_session: AsyncSession) -> None:
+    body = b"x"
+    record = _record(db_session, "x.txt", body)
+    await db_session.commit()
+
+    storage = FakeStorage()
+    blob = await db_session.get(Blob, record.blob_hash)
+    assert blob is not None
+    await storage.put(blob.storage_key, body, None)
+
+    sandbox = _FakeSandbox()
+    sandbox.files = _BrokenFiles()
+    ws = SandboxWorkspace(storage, uuid.uuid4(), "run-5", sandbox)
+    entries = await ws.resolve_keys(db_session, [str(record.id)])
+
+    assert "写入沙箱失败" in entries[0]["error"]
+
+
+async def test_sandbox_resolve_keys_rejects_other_owner(db_session: AsyncSession) -> None:
+    record = _record(db_session, "private.txt", b"secret", owner_id=uuid.uuid4())
+    await db_session.commit()
+
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-owner", sandbox)
+    entries = await ws.resolve_keys(db_session, [str(record.id)], owner_id=uuid.uuid4())
+
+    assert entries[0]["error"] == "文件不存在或已被删除"
     assert sandbox.files.written == {}
 
 
