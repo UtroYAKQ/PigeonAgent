@@ -118,8 +118,23 @@ export function applyAgUiEvent(live: LiveRun, event: AgUiEvent): void {
       break
     }
     case 'TOOL_CALL_RESULT': {
-      const block = live.blocks.find(item => item.kind === 'tool' && item.id === event.toolCallId)
-      if (block?.tool) {
+      let block = live.blocks.find(item => item.kind === 'tool' && item.id === event.toolCallId)
+      if (!block) {
+        // resume 的结果没有对应的 TOOL_CALL_START（call 在上一段 run 里）；
+        // 补一个同 id 的块，mergeTurnViews 才能把结果并回原步骤
+        block = {
+          id: event.toolCallId,
+          kind: 'tool',
+          tool: {
+            toolCallId: event.toolCallId,
+            name: 'tool',
+            argsText: '',
+            state: 'success',
+          },
+        }
+        live.blocks.push(block)
+      }
+      if (block.tool) {
         block.tool.resultText = event.content
         if (event.messageId) block.tool.resultMessageId = event.messageId
         block.tool.state = 'success'

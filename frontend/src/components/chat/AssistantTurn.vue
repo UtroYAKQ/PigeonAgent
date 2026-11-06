@@ -22,6 +22,7 @@ const props = defineProps<{
   view: TurnView
   isLast: boolean
   hasBatch?: boolean
+  hasPendingBatch?: boolean
   hideActions?: boolean
 }>()
 
@@ -159,7 +160,10 @@ async function retry(): Promise<void> {
       </button>
     </div>
 
-    <SourcesRow v-if="view.sources.length && !isStreaming" :sources="view.sources" />
+    <SourcesRow
+      v-if="view.sources.length && !isStreaming && !hasPendingBatch && !chat.busy"
+      :sources="view.sources"
+    />
 
     <slot name="pending" />
 

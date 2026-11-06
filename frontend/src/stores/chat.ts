@@ -101,6 +101,8 @@ export const useChatStore = defineStore('chat', () => {
 
   const activeRunId = ref<string | null>(null)
   const liveRun = ref<LiveRun | null>(null)
+  // 同一 run 续写时，live 流只包含续写段；视图需要先铺上这条 run 已落库的内容
+  const resumedLiveRunId = ref<string | null>(null)
   const cancelling = ref(false)
   const streamAbort = shallowRef<AbortController | null>(null)
   let streamGeneration = 0
@@ -212,8 +214,16 @@ export const useChatStore = defineStore('chat', () => {
     editingText.value = ''
     resumingInterruptId.value = null
     resumedInterruptIds.value = []
+    resumedLiveRunId.value = null
     runs.value = []
     runsHasMore.value = false
+  }
+
+  /** 同一 run 续写过（内容里留有请求批次）就说明当前 live 流只是续写段。 */
+  function runHasResumeMarker(run: SessionRun | undefined): boolean {
+    return Boolean(
+      run?.content.some(item => item.type === 'approval_request' || item.type === 'call_request'),
+    )
   }
 
   /** 这个中断批次已经提交成功了，卡片和输入框都不该再把它算作未决。 */
@@ -394,7 +404,11 @@ export const useChatStore = defineStore('chat', () => {
       if (session.has_unread) void markSessionRead(id)
 
       if (session.active_run_id) {
+        const activeRun = list.items.find(item => item.id === session.active_run_id)
+        resumedLiveRunId.value = runHasResumeMarker(activeRun) ? session.active_run_id : null
         void attachStream(id, session.active_run_id, 0)
+      } else {
+        resumedLiveRunId.value = null
       }
     } catch (error) {
       if (currentSessionId.value !== id) return
@@ -573,12 +587,16 @@ export const useChatStore = defineStore('chat', () => {
       // 别的标签页正在生成：接入它的流，消息文本留在输入框里
       activeRunId.value = existingRunId
       cancelling.value = false
+      resumedLiveRunId.value = runHasResumeMarker(
+        runs.value.find(item => item.id === existingRunId),
+      ) ? existingRunId : null
       void attachStream(session.id, existingRunId, 0)
       requestScroll(true)
       return { sessionId: session.id, joinedActiveRun: true }
     }
     activeRunId.value = runId
     cancelling.value = false
+    resumedLiveRunId.value = null
     await refreshRunsAfterStart(session.id)
     if (currentSessionId.value !== session.id) {
       return { sessionId: session.id, joinedActiveRun: false }
@@ -600,6 +618,7 @@ export const useChatStore = defineStore('chat', () => {
     })
     if (currentSessionId.value !== sessionId) return
     activeRunId.value = runId
+    resumedLiveRunId.value = null
     await refreshRunsAfterStart(sessionId)
     if (currentSessionId.value !== sessionId) return
     requestScroll(true)
@@ -646,6 +665,7 @@ export const useChatStore = defineStore('chat', () => {
     editingRun.value = null
     editingText.value = ''
     activeRunId.value = runId
+    resumedLiveRunId.value = null
     await refreshRunsAfterStart(sessionId)
     if (currentSessionId.value !== sessionId) return
     requestScroll(true)
@@ -823,6 +843,7 @@ export const useChatStore = defineStore('chat', () => {
       resumedInterruptIds.value = [...resumedInterruptIds.value, payload.interruptId]
       if (currentSessionId.value !== sessionId) return
       activeRunId.value = runId
+      resumedLiveRunId.value = runId
       await refreshRunsAfterStart(sessionId)
       if (currentSessionId.value !== sessionId) return
       requestScroll(true)
@@ -1014,6 +1035,7 @@ export const useChatStore = defineStore('chat', () => {
     maxImageAttachments,
     maxResourceFiles,
     toolResultsByCallId,
+    resumedLiveRunId,
     hasPendingInterrupts,
     resumingInterruptId,
     isInterruptResumed,

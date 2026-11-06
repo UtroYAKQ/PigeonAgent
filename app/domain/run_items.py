@@ -275,7 +275,7 @@ PendingInterrupts = list[PendingInterrupt]
 
 
 def resource_tag(storage_key: str, name: str, media_type: str) -> str:
-    """resource 在上下文里的文本形状；模型照此理解，前端照此打码。"""
+    """resource 在上下文里的文本形状；模型照此理解，回复正文不要回显。"""
     return (
         f'<resource storage_key="{storage_key}" original_name="{name}" mime_type="{media_type}"/>'
     )

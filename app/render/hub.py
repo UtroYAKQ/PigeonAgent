@@ -78,13 +78,13 @@ class RenderHub:
                 f"Session {session_id} already has an active run",
                 active_run_id=_as_text(current),
             )
-        return RenderProducer(
-            self,
-            session_id,
-            RedisRenderQueue(
-                self._redis, run_id, key_prefix=self._prefix, retain_seconds=self._retain
-            ),
+        redis_queue = RedisRenderQueue(
+            self._redis, run_id, key_prefix=self._prefix, retain_seconds=self._retain
         )
+        # 同一 run 续写：上一段的事件流已经消费完，清掉再写新一段，
+        # 否则前端从 0 回放会把中断前的思考/工具再渲染一遍
+        await redis_queue.reset()
+        return RenderProducer(self, session_id, redis_queue)
 
     async def subscribe(
         self, run_id: str, after: int = 0, *, session_id: UUID | None = None

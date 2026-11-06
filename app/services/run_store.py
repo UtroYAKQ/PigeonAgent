@@ -503,7 +503,7 @@ async def start_run_turn(
     resume: ResumeDecisions | None = None,
     model_id: int | None = None,
 ) -> SessionRun:
-    """占用当前 run；resume 先校验决定，并把叶子挪到声明批次的那条 run 上。
+    """占用当前 run；resume 直接续写声明批次的那条 run，不再另开一条。
 
     决策 item 不在这里写：批次要一直算未决，直到承接它的 run 真正跑完。
     """
@@ -519,29 +519,46 @@ async def start_run_turn(
 
     chat_session_id = chat_session.id
     run_uuid = UUID(run_id)
-    content: list[RunItem] = []
-    parent: UUID | None = None
 
     if resume is not None:
-        parent = await _claim_resume(db, chat_session_id, chat_session, resume)
+        target = await _claim_resume(db, chat_session_id, chat_session, resume)
+        if target != run_uuid:
+            await _abort(
+                db,
+                ConflictError(f"Resume must continue run {target}; got {run_uuid}"),
+            )
+        run = await _lock_run(db, session_id, run_uuid)
+        now = datetime.now(UTC)
+        run.status = RunStatus.RUNNING.value
+        run.updated_at = now
+        if model_id is not None:
+            run.model_id = model_id
+        chat_session.last_run_at = now
+        chat_session.active_leaf_run_id = run.id
+        chat_session.active_run_id = run_id
+        chat_session.active_run_expires_at = _lease_expires_at(now)
+        await db.commit()
+        await db.refresh(run)
+        _invalidate_branch_cache(session_id)
+        return run
+
+    content: list[RunItem] = []
+    parent: UUID | None = None
+    if retry_run_id is not None:
+        source = await get_run_or_404(db, session_id, retry_run_id)
+        content = codec.copied_user_items(source.content)
+        if not content:
+            await _abort(db, UnprocessableError(f"Run {retry_run_id} has no user input to retry"))
+        parent = source.parent_run_id
     else:
-        if retry_run_id is not None:
-            source = await get_run_or_404(db, session_id, retry_run_id)
-            content = codec.copied_user_items(source.content)
-            if not content:
-                await _abort(
-                    db, UnprocessableError(f"Run {retry_run_id} has no user input to retry")
-                )
-            parent = source.parent_run_id
-        else:
-            if user_input is None and not attachments and not resource_items:
-                await _abort(db, UnprocessableError("Run has no user input"))
-            if user_input is not None:
-                content.extend(codec.user_items_from_text(user_input))
-            content.extend(codec.attachment_items(attachments))
-            content.extend(resource_items or [])
-            parent = parent_run_id if parent_was_given else chat_session.active_leaf_run_id
-        await _require_branch_is_quiet(db, session_id, parent)
+        if user_input is None and not attachments and not resource_items:
+            await _abort(db, UnprocessableError("Run has no user input"))
+        if user_input is not None:
+            content.extend(codec.user_items_from_text(user_input))
+        content.extend(codec.attachment_items(attachments))
+        content.extend(resource_items or [])
+        parent = parent_run_id if parent_was_given else chat_session.active_leaf_run_id
+    await _require_branch_is_quiet(db, session_id, parent)
 
     chat_session.run_seq += 1
     now = datetime.now(UTC)
@@ -551,7 +568,7 @@ async def start_run_turn(
         parent_run_id=parent,
         seq=chat_session.run_seq,
         status=RunStatus.RUNNING.value,
-        kind=(RunKind.RESUME if resume is not None else RunKind.TURN).value,
+        kind=RunKind.TURN.value,
         content=content,
         model_id=model_id,
         preview=codec.preview_of(content),
@@ -566,11 +583,8 @@ async def start_run_turn(
     chat_session.last_run_at = now
     chat_session.active_run_id = run_id
     chat_session.active_run_expires_at = _lease_expires_at(now)
-    if resume is None:
-        # 新轮只在 quiet 分支上开，未决批次必为 0，不用为此扫整条路径
-        chat_session.pending_batches = 0
-    else:
-        await _sync_pending_count(db, chat_session, run.id)
+    # 新轮只在 quiet 分支上开，未决批次必为 0，不用为此扫整条路径
+    chat_session.pending_batches = 0
     await db.commit()
     await db.refresh(run)
     _invalidate_branch_cache(session_id)

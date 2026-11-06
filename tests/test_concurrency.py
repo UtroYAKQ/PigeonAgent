@@ -145,18 +145,19 @@ async def test_resume_claims_the_branch_and_resolves_after_the_run(
     resumed = await run_service.start_run_turn(
         db_session,
         session_id,
-        run_id=str(uuid4()),
+        run_id=str(declaring_id),
         resume=run_service.ResumeDecisions(interrupt_id=batch_id, approvals={"call_1": True}),
     )
 
-    # 这一步还没写决定：批次仍未决，run 崩了可以原地重试
+    # 同一轮续写：不新增 run，只在原来的 run 上继续；批次仍未决，崩了可以原地重试
+    assert resumed.id == declaring_id
     runs = await path(db_session, session_id)
-    assert [run.id for run in runs] == [declaring_id, resumed.id]
-    assert (await head(db_session, session_id)).active_leaf_run_id == resumed.id
+    assert [run.id for run in runs] == [declaring_id]
+    assert (await head(db_session, session_id)).active_leaf_run_id == declaring_id
     assert [batch.interrupt_id for batch in await pending(db_session, session_id)] == [batch_id]
 
-    # 模拟 resume run 里工具结果 + 审批回复事件已落库
-    resumed_id = resumed.id
+    # 模拟续写里工具结果 + 审批回复事件已落库
+    resumed_id = declaring_id
     await run_service.append_items(
         db_session,
         session_id,

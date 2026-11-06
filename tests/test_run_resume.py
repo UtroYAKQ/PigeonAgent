@@ -1,4 +1,4 @@
-"""HTTP 审批/外部调用恢复：中断挂在 run 的 ToolCallItem 上，resume 另开一个 run。"""
+"""HTTP 审批/外部调用恢复：中断挂在 run 的 ToolCallItem 上，resume 在同一条 run 上续写。"""
 
 import asyncio
 import time
@@ -10,10 +10,12 @@ from httpx import AsyncClient
 from pydantic_ai import Tool
 from pydantic_ai.exceptions import CallDeferred
 from pydantic_ai.models.test import TestModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
 from app.infra.model_factory import ModelFactory, ResolvedModel
+from app.models.chat_request_log import ChatRequestLog
 from app.models.llm_model import LlmModel
 from app.schemas.session import SessionCreate
 from app.services import chat_session as session_service
@@ -241,16 +243,28 @@ async def test_resume_approves_and_executes(
         json={"interrupt_id": interrupt_id, "approvals": {call_id: True}},
     )
     assert resumed.status_code == 202
+    assert resumed.json()["run_id"] == batch["run_id"]
     await wait_run_finished(client, session_id)
 
     assert await pending_items(client, session_id) == []
     runs = await list_runs(client, session_id)
-    assert len(runs) == 2
-    resume_run = runs[-1]
-    assert resume_run["parent_run_id"] == batch["run_id"]
-    results = items_of_type(resume_run, "tool_result")
+    assert len(runs) == 1
+    run = runs[0]
+    # 同一轮续写：还是原来那条 run，不新增 resume run
+    assert run["id"] == batch["run_id"]
+    results = items_of_type(run, "tool_result")
     assert any(item["tool_call_id"] == call_id for item in results)
-    assert items_of_type(resume_run, "text")
+    assert items_of_type(run, "text")
+
+    # 中断那次的日志由续写更新，同一轮只留一条请求记录
+    db_session.expire_all()
+    logs = list(
+        await db_session.scalars(
+            select(ChatRequestLog).where(ChatRequestLog.run_id == UUID(batch["run_id"]))
+        )
+    )
+    assert len(logs) == 1
+    assert logs[0].status == "completed"
 
 
 async def test_resume_denies_without_running_tool(

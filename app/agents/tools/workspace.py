@@ -178,6 +178,6 @@ def workspace_instructions() -> str:
         "先调 load_files（把 storage_key 传进去），"
         "它会以 original_name 落进工作区，之后的 write_file / read_file 都用相对路径。"
         "工作区里的文件不会自动出现在会话里；只有调用 publish_file 才会上传成可下载的产物，"
-        "所以需要交付的文件要主动发布。"
+        "所以需要交付的文件要主动发布。回答正文不要回显 <resource/> 标签，直接说文件名即可。"
         "需要看文本内容时用 read_file 范围读取。"
     )

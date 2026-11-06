@@ -24,6 +24,7 @@ from app.agents.tools.workspace import workspace_tools
 from app.agents.turn import summarize_error
 from app.core.config import Settings, get_settings
 from app.core.exceptions import (
+    ConflictError,
     NotFoundError,
     ServiceUnavailableError,
     StorageUnavailableError,
@@ -245,8 +246,22 @@ async def launch_run(
     # 积分不足就在开跑前拦下：跑完再告知"你欠费了"是最糟的体验
     await billing.require_credits(db, runtime, owner_id)
 
-    # 生成 run id；session.active_run_id 由 start_run_turn 在同一事务里占用
-    run_id = str(uuid4())
+    if isinstance(payload, RunResume):
+        batch = next(
+            (
+                item
+                for item in await run_store.pending_batches(db, session_id)
+                if item.interrupt_id == payload.interrupt_id
+            ),
+            None,
+        )
+        if batch is None:
+            raise ConflictError(f"Interrupt batch {payload.interrupt_id} is not pending")
+        # 同一轮续写：沿用声明批次的那条 run，事件流也复用同一个 id
+        run_id = str(batch.run_id)
+    else:
+        # 生成 run id；session.active_run_id 由 start_run_turn 在同一事务里占用
+        run_id = str(uuid4())
     producer = await hub.create(session_id, run_id)
     try:
         await run_store.start_run_turn(

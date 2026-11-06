@@ -112,6 +112,24 @@ async def test_run_finished_frees_the_session_slot() -> None:
     await next_producer.close()
 
 
+async def test_reusing_a_run_id_starts_a_fresh_stream() -> None:
+    """同一 run 续写：旧事件不能回放给新一段流。"""
+    hub = build_hub(FakeAsyncRedis())
+    first = await hub.create(SESSION_ID, "run-reuse")
+    await first.publish(text("旧内容"))
+    await first.close()
+
+    second = await hub.create(SESSION_ID, "run-reuse")
+    consumer = await hub.subscribe("run-reuse")
+    assert consumer is not None
+    await second.publish(text("续写内容"))
+    await second.close()
+
+    items = await drain(consumer)
+    assert [item.seq for item in items] == [1]
+    assert "续写内容" in items[0].event.model_dump_json()
+
+
 async def test_two_hubs_share_one_redis_like_two_workers() -> None:
     """跨进程等价场景：A 进程建流发事件，B 进程按游标接入回放。"""
     client = FakeAsyncRedis()

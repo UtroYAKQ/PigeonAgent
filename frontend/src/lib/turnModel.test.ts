@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { LiveRun, SessionRun } from '@/types/api'
-import { buildTurnView } from './turnModel'
+import { buildTurnView, mergeTurnViews } from './turnModel'
 
 const now = '2026-01-01T00:00:00Z'
 
@@ -304,6 +304,48 @@ describe('buildTurnView', () => {
     )
     expect(view.cancelled).toBe(true)
     expect(view.steps[0]?.state).toBe('interrupted')
+  })
+
+  it('merges a resumed result into the interrupted step', () => {
+    const call = {
+      ...base('c1'),
+      type: 'tool_call' as const,
+      tool_call_id: 'call-1',
+      tool_name: 'ui_open_html_preview',
+      args: {},
+    }
+    const baseView = buildTurnView(run([call], 'interrupted'), null)
+    expect(baseView.steps[0]?.state).toBe('interrupted')
+
+    const liveView = buildTurnView(
+      run([], 'running'),
+      liveRun([
+        {
+          id: 'call-1',
+          kind: 'tool',
+          tool: {
+            toolCallId: 'call-1',
+            name: 'tool',
+            argsText: '',
+            resultText: '{"opened":true}',
+            state: 'success',
+          },
+        },
+      ]),
+    )
+    const merged = mergeTurnViews(baseView, liveView)
+
+    expect(merged.steps).toHaveLength(1)
+    expect(merged.steps[0]?.name).toBe('ui_open_html_preview')
+    expect(merged.steps[0]?.state).toBe('success')
+    expect(merged.steps[0]?.label).toBe('预览已生成')
+    const toolEntries = merged.segments.flatMap(segment => (
+      segment.kind === 'chain'
+        ? segment.entries.filter(entry => entry.kind === 'tool')
+        : []
+    ))
+    expect(toolEntries).toHaveLength(1)
+    expect(toolEntries[0]?.kind === 'tool' ? toolEntries[0].step.state : null).toBe('success')
   })
 
   it('never leaves unfinished tools running after the run is over', () => {

@@ -62,6 +62,12 @@ class RedisRenderQueue:
             pipe.expire(self._seq_key, _ACTIVE_STREAM_TTL_SECONDS)
             await pipe.execute()
 
+    async def reset(self) -> None:
+        """同一 run 续写前清掉上一段的流；调用方已确认没有活跃 producer。"""
+        async with self._client.pipeline(transaction=True) as pipe:
+            pipe.delete(self._stream, self._seq_key, self._closed_key)
+            await pipe.execute()
+
     async def close(self) -> None:
         if self._closed:
             return

@@ -1,6 +1,7 @@
 """对话请求日志：run 收尾时留一条，供后台按用户/时间回看。
 
-只有 run 收尾一个写入点，和计费结算并列——它俩看的都是同一份 run.usage。
+同一 run 中断后续写会多次收尾，日志按 run_id 更新同一条，
+不会把一轮对话拆成多条请求记录。
 """
 
 from __future__ import annotations
@@ -43,22 +44,48 @@ async def finish_run_log(
     model = await db.get(LlmModel, run.model_id) if run.model_id is not None else None
     finished = datetime.now(UTC)
     totals = await billing.run_charge_totals(db, run_id)
-    log = ChatRequestLog(
-        user_id=owner_id,
-        session_id=session_id,
-        run_id=run_id,
-        kind=run.kind,
-        # run 已经结束才会有这条日志；状态读不出来就写 unknown，不要伪造"还在跑"
-        status=status or "unknown",
-        model_id=run.model_id,
-        model_name=model.name if model is not None else None,
-        usage=run.usage,
-        credits_charged=totals.credits,
-        images_generated=totals.images,
-        error=error[:500] if error else None,
-        duration_ms=max(int((finished - started_at).total_seconds() * 1000), 0),
-        finished_at=finished,
+    # 以 run 起点算整轮时长；resume 那次 started_at 只是续写段的起点。
+    # SQLite 读回来可能是 naive，按 UTC 解释才能和 finished 相减。
+    created_at = run.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    duration_ms = max(int((finished - created_at).total_seconds() * 1000), 0)
+    log = await db.scalar(
+        select(ChatRequestLog)
+        .where(ChatRequestLog.run_id == run_id)
+        .order_by(ChatRequestLog.created_at.desc())
+        .limit(1)
     )
-    db.add(log)
+    if log is None:
+        log = ChatRequestLog(
+            user_id=owner_id,
+            session_id=session_id,
+            run_id=run_id,
+            kind=run.kind,
+            status=status or "unknown",
+            model_id=run.model_id,
+            model_name=model.name if model is not None else None,
+            usage=run.usage,
+            credits_charged=totals.credits,
+            images_generated=totals.images,
+            error=error[:500] if error else None,
+            duration_ms=duration_ms,
+            finished_at=finished,
+        )
+        db.add(log)
+    else:
+        # 中断后续写：同一轮只保留一条日志，更新到最后一次收尾
+        log.user_id = owner_id
+        log.session_id = session_id
+        log.kind = run.kind
+        log.status = status or "unknown"
+        log.model_id = run.model_id
+        log.model_name = model.name if model is not None else None
+        log.usage = run.usage
+        log.credits_charged = totals.credits
+        log.images_generated = totals.images
+        log.error = error[:500] if error else None
+        log.duration_ms = duration_ms
+        log.finished_at = finished
     await db.commit()
     return log

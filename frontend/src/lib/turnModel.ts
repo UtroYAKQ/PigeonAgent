@@ -528,6 +528,29 @@ export function buildTurnView(
   return buildHistoryView(view, run, externalResults)
 }
 
+/** 同一次工具调用的结果在续写段里又出现时，保留原位置、用实时结果覆盖旧状态。 */
+function mergeChainEntries(base: ChainEntry[], live: ChainEntry[]): ChainEntry[] {
+  const entries = [...base]
+  const toolIndex = new Map<string, number>()
+  entries.forEach((entry, index) => {
+    if (entry.kind === 'tool') toolIndex.set(entry.step.id, index)
+  })
+  for (const entry of live) {
+    if (entry.kind !== 'tool') {
+      entries.push(entry)
+      continue
+    }
+    const index = toolIndex.get(entry.step.id)
+    if (index === undefined) {
+      toolIndex.set(entry.step.id, entries.length)
+      entries.push(entry)
+    } else {
+      entries[index] = entry
+    }
+  }
+  return entries
+}
+
 function mergeSegments(base: TurnSegment[], live: TurnSegment[]): TurnSegment[] {
   const merged = [...base]
   const tail = merged[merged.length - 1]
@@ -535,7 +558,7 @@ function mergeSegments(base: TurnSegment[], live: TurnSegment[]): TurnSegment[] 
   if (tail?.kind === 'chain' && head?.kind === 'chain') {
     merged[merged.length - 1] = {
       ...tail,
-      entries: [...tail.entries, ...head.entries],
+      entries: mergeChainEntries(tail.entries, head.entries),
       streaming: head.streaming,
     }
     merged.push(...live.slice(1))
@@ -558,10 +581,31 @@ function mergeSegments(base: TurnSegment[], live: TurnSegment[]): TurnSegment[] 
   return merged
 }
 
+/** 同一次工具调用的结果可能在 resume run 里，按 id 合并而不是简单拼接。 */
+function mergeSteps(base: ToolStep[], live: ToolStep[]): ToolStep[] {
+  const byId = new Map(base.map(step => [step.id, step]))
+  for (const step of live) {
+    const existing = byId.get(step.id)
+    if (!existing) {
+      byId.set(step.id, step)
+      continue
+    }
+    const state = step.state === 'running' || step.state === 'waiting' ? existing.state : step.state
+    byId.set(step.id, {
+      ...existing,
+      result: step.result ?? existing.result,
+      outcome: step.outcome ?? existing.outcome,
+      state,
+      label: toolLabel(existing.name, state),
+    })
+  }
+  return [...byId.values()]
+}
+
 export function mergeTurnViews(base: TurnView | null, live: TurnView): TurnView {
   if (!base) return live
   const segments = mergeSegments(base.segments, live.segments)
-  const steps = [...base.steps, ...live.steps]
+  const steps = mergeSteps(base.steps, live.steps)
   return {
     ...live,
     userText: [base.userText, live.userText].filter(Boolean).join('\n\n'),

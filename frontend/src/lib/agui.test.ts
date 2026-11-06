@@ -157,6 +157,21 @@ describe('applyAgUiEvent 工具调用', () => {
     expect(live.blocks[0]?.tool).toMatchObject({ state: 'success', resultText: 'a.md', resultMessageId: 'res-1' })
   })
 
+  it('resume 的结果没有 START 时补一个工具块，留给合并逻辑按 id 并回原步骤', () => {
+    const live = apply({
+      type: 'TOOL_CALL_RESULT',
+      toolCallId: 'call-resume',
+      messageId: 'res-2',
+      content: '{"opened":true}',
+    })
+    expect(blockOf(live, 'call-resume')?.kind).toBe('tool')
+    expect(blockOf(live, 'call-resume')?.tool).toMatchObject({
+      toolCallId: 'call-resume',
+      state: 'success',
+      resultText: '{"opened":true}',
+    })
+  })
+
   it('已有结果的工具有后到的 START 不会被覆盖成 running', () => {
     const live = apply(
       start,

@@ -63,7 +63,20 @@ const view = computed(() => {
     currentLive,
     chat.toolResultsByCallId,
   )
-  return mergeTurnViews(baseView, liveView)
+  const merged = mergeTurnViews(baseView, liveView)
+  // 同一 run 续写：先把这条 run 已落库的前半段铺回来，再接实时段。
+  // 用户字段只保留一份，否则 run 自己的 user text 会被算两次。
+  const historyView = chat.resumedLiveRunId === currentLive.runId && liveEntry.value
+    ? buildTurnView(liveEntry.value, null, chat.toolResultsByCallId)
+    : null
+  if (!historyView) return merged
+  const combined = mergeTurnViews(historyView, merged)
+  combined.userText = merged.userText
+  combined.userImages = merged.userImages
+  combined.userVideos = merged.userVideos
+  combined.userResources = merged.userResources
+  combined.userFiles = merged.userFiles
+  return combined
 })
 
 const hasUser = computed(() => hasUserOutput(view.value))
@@ -171,6 +184,7 @@ watch(
       :view="displayView"
       :is-last="isLast"
       :has-batch="hasBatch"
+      :has-pending-batch="hasPendingBatch"
       :hide-actions="hasPendingBatch"
     >
       <template #pending>
