@@ -82,16 +82,48 @@ class RunRegistry:
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def cancel_run(self, session_id: UUID, run_id: str, hub: RenderHub) -> None:
-        cancellation = self.cancellations.get(run_id)
-        if cancellation is not None and cancellation[0] != session_id:
+    async def register(
+        self, run_id: str, session_id: UUID, cancellation: CancellationToken
+    ) -> None:
+        self.cancellations[run_id] = (session_id, cancellation)
+        if self.control is None:
+            return
+        await self.control.register(run_id, session_id)
+        try:
+            # 取消可能恰好发生在注册令牌之前：listener 那时看不到本地 token，
+            # 注册完再补查一次 durable 标记，避免这个极窄窗口漏取消。
+            if await self.control.cancel_requested(run_id):
+                cancellation.cancel()
+                logger.info("Run %s cancelled from an early durable flag", run_id)
+        except Exception:
+            logger.exception("Failed to reconcile early cancel flag for run %s", run_id)
+
+    async def unregister(self, run_id: str) -> None:
+        self.cancellations.pop(run_id, None)
+        if self.control is not None:
+            await self.control.unregister(run_id)
+
+    async def cancel_run(self, session_id: UUID, run_id: str) -> None:
+        local = self.cancellations.get(run_id)
+        if local is not None:
+            if local[0] != session_id:
+                raise NotFoundError(f"Run {run_id} is not active")
+            local[1].cancel()
+            return
+        if self.control is None:
             raise NotFoundError(f"Run {run_id} is not active")
-        if hub.distributed:
-            await hub.request_cancel(session_id, run_id)
-        elif cancellation is None:
+        try:
+            handled = await self.control.request_cancel(session_id, run_id)
+        except Exception as exc:
+            logger.exception("Run control cancel request failed for %s", run_id)
+            raise ServiceUnavailableError("取消通道暂时不可用，请稍后重试") from exc
+        if not handled:
             raise NotFoundError(f"Run {run_id} is not active")
-        if cancellation is not None:
-            cancellation[1].cancel()
+
+    async def touch(self, run_id: str) -> None:
+        local = self.cancellations.get(run_id)
+        if local is not None and self.control is not None:
+            await self.control.touch(run_id, local[0])
 
     async def cancel_all(self) -> None:
         tasks = list(self.tasks)
@@ -248,7 +280,6 @@ async def launch_run(
             thinking_level=thinking_level,
             cancellation_token=cancellation_token,
             registry=registry,
-            hub=hub,
             toolset=toolset,
             enable_web_search=enable_web_search,
             enable_image_generation=enable_image_generation,
@@ -272,7 +303,6 @@ async def execute_run(
     cancellation_token: CancellationToken | None = None,
     deferred_tool_results: DeferredToolResults | None = None,
     registry: RunRegistry | None = None,
-    hub: RenderHub | None = None,
     toolset: AbstractToolset[Any] | None = None,
     enable_web_search: bool = False,
     enable_image_generation: bool = True,
@@ -288,11 +318,8 @@ async def execute_run(
     wall_started = datetime.now(UTC)
     first_event_logged = False
     # 租约心跳：长工具调用期间不写 item，心跳保住租约，别的 resume 才抢不走
-    heartbeat = asyncio.create_task(_renew_lease_loop(session_factory, session_id, run_id, hub=hub))
-    cancellation_watcher = (
-        asyncio.create_task(_watch_cancellation(hub, session_id, run_id, cancellation_token))
-        if hub is not None and hub.distributed and cancellation_token is not None
-        else None
+    heartbeat = asyncio.create_task(
+        _renew_lease_loop(session_factory, session_id, run_id, registry, producer)
     )
     try:
         async with session_factory() as db:
@@ -401,10 +428,6 @@ async def execute_run(
         heartbeat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat
-        if cancellation_watcher is not None:
-            cancellation_watcher.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await cancellation_watcher
         if registry is not None:
             await registry.unregister(run_id)
         final_status = await _final_status(session_factory, session_id, run_uuid)
@@ -562,8 +585,8 @@ async def _renew_lease_loop(
     session_factory: SessionFactory,
     session_id: UUID,
     run_id: str,
-    *,
-    hub: RenderHub | None = None,
+    registry: RunRegistry | None = None,
+    producer: RenderProducer | None = None,
 ) -> None:
     """按租约三分之一周期续租，直到 finally 把它取消掉。
 
@@ -576,24 +599,12 @@ async def _renew_lease_loop(
         try:
             async with session_factory() as db:
                 await run_store.renew_run_lease(db, session_id, run_id)
-            if hub is not None:
-                await hub.renew(session_id, run_id)
+            if registry is not None:
+                await registry.touch(run_id)
+            if producer is not None:
+                await producer.touch()
         except Exception:
             logger.exception("Lease renewal failed for run %s in session %s", run_id, session_id)
-
-
-async def _watch_cancellation(
-    hub: RenderHub,
-    session_id: UUID,
-    run_id: str,
-    cancellation_token: CancellationToken,
-) -> None:
-    """轮询持久取消键，避免 Pub/Sub 消息在 worker 重连时丢失。"""
-    while True:
-        if await hub.cancellation_requested(session_id, run_id):
-            cancellation_token.cancel()
-            return
-        await asyncio.sleep(0.25)
 
 
 async def _release_run_lease(

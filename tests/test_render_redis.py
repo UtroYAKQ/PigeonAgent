@@ -7,10 +7,8 @@ import pytest
 from ag_ui.core import RunFinishedEvent, RunStartedEvent, TextMessageContentEvent
 from fakeredis import FakeAsyncRedis
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError
 from app.render import RenderConsumer, RenderCursorInvalid, RenderEvent, RenderHub
-from app.services import run as run_service
-from app.services.run import RunRegistry
 
 SESSION_ID = uuid4()
 
@@ -135,65 +133,6 @@ async def test_two_hubs_share_one_redis_like_two_workers() -> None:
     # close 之后 B 侧的互斥标记也要解掉
     next_producer = await hub_b.create(SESSION_ID, "next-run")
     await next_producer.close()
-
-
-async def test_cancel_request_is_visible_across_workers() -> None:
-    client = FakeAsyncRedis()
-    prefix = f"test-{uuid4().hex[:8]}"
-    hub_a = build_hub(client, prefix=prefix)
-    hub_b = build_hub(client, prefix=prefix)
-    producer = await hub_a.create(SESSION_ID, "cancel-shared")
-
-    await hub_b.request_cancel(SESSION_ID, "cancel-shared")
-    assert await hub_a.cancellation_requested(SESSION_ID, "cancel-shared")
-    with pytest.raises(NotFoundError):
-        await hub_b.request_cancel(uuid4(), "cancel-shared")
-
-    await producer.close()
-    assert not await hub_a.cancellation_requested(SESSION_ID, "cancel-shared")
-
-
-async def test_registry_cancel_reaches_the_worker_running_the_task() -> None:
-    class FakeCancellationToken:
-        def __init__(self) -> None:
-            self.cancelled = asyncio.Event()
-
-        def cancel(self) -> None:
-            self.cancelled.set()
-
-    client = FakeAsyncRedis()
-    prefix = f"test-{uuid4().hex[:8]}"
-    execution_hub = build_hub(client, prefix=prefix)
-    api_hub = build_hub(client, prefix=prefix)
-    producer = await execution_hub.create(SESSION_ID, "remote-cancel")
-    token = FakeCancellationToken()
-    watcher = asyncio.create_task(
-        run_service._watch_cancellation(  # type: ignore[arg-type]
-            execution_hub, SESSION_ID, "remote-cancel", token
-        )
-    )
-
-    await RunRegistry().cancel_run(SESSION_ID, "remote-cancel", api_hub)
-    await asyncio.wait_for(token.cancelled.wait(), timeout=1)
-    await watcher
-    await producer.close()
-
-
-async def test_renew_refreshes_only_matching_active_metadata() -> None:
-    client = FakeAsyncRedis()
-    prefix = f"test-{uuid4().hex[:8]}"
-    hub = build_hub(client, prefix=prefix)
-    producer = await hub.create(SESSION_ID, "long-run")
-    owner_key = f"{prefix}:owner:long-run"
-    active_key = f"{prefix}:active:{SESSION_ID}"
-    await client.expire(owner_key, 1)
-    await client.expire(active_key, 1)
-
-    assert await hub.renew(SESSION_ID, "long-run")
-    assert await client.ttl(owner_key) > 1
-    assert await client.ttl(active_key) > 1
-    assert not await hub.renew(SESSION_ID, "other-run")
-    await producer.close()
 
 
 async def test_late_subscriber_gets_none_but_attached_consumer_drains() -> None:
