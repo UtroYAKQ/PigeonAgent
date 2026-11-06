@@ -8,6 +8,7 @@ from pydantic_ai.messages import (
     FilePart,
     ImageUrl,
     ToolCallPart,
+    ToolResultEvent,
     ToolReturnPart,
     UserPromptPart,
 )
@@ -17,12 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import codec
 from app.agents.base import BaseAgent
 from app.agents.store import SessionStore
+from app.agents.turn import AgentTurn
 from app.core.config import Settings
 from app.core.exceptions import ConfigurationError
 from app.db.types import dump_message, load_message
 from app.domain.run_items import (
     ApprovalRequestItem,
     ImageItem,
+    RunItem,
     TextItem,
     TokenUsage,
     ToolCallItem,
@@ -48,6 +51,15 @@ from tests.test_files import FakeStorage
 class HistoryAgent(BaseAgent):
     name: ClassVar[str] = "history"
     instructions: ClassVar[str] = "你是测试助手。"
+
+
+class _RecordingStore:
+    def __init__(self) -> None:
+        self.appended: list[RunItem] = []
+
+    async def append_items(self, items: list[RunItem], *, usage: Any = None) -> list[RunItem]:
+        self.appended.extend(items)
+        return list(items)
 
 
 def make_agent(
@@ -243,6 +255,37 @@ async def test_context_rehydrates_referenced_tool_image(
     assert isinstance(result.content, BinaryContent)
     assert result.content.data == raw
     assert result.content.identifier == str(record.id)
+
+
+async def test_turn_strips_nested_binary_bytes_before_saving_tool_item() -> None:
+    raw = b"\x89PNG\r\n\x1a\nnested"
+    resource = str(uuid4())
+    store = _RecordingStore()
+    turn = AgentTurn(object(), store, None)  # type: ignore[arg-type]
+
+    await turn._on_tool_result(
+        ToolResultEvent(
+            ToolReturnPart(
+                tool_name="view_image",
+                tool_call_id="call-nested",
+                content={
+                    "image": BinaryContent(data=raw, media_type="image/png", identifier=resource)
+                },
+            )
+        )
+    )
+
+    [item] = store.appended
+    assert isinstance(item, ToolResultItem)
+    assert item.content == {
+        "image": {
+            "media": "binary",
+            "media_type": "image/png",
+            "resource": resource,
+            "size": len(raw),
+        }
+    }
+    assert codec.media_file_ids([item]) == [resource]
 
 
 def test_model_file_part_becomes_display_media_item() -> None:

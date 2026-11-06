@@ -127,6 +127,8 @@ def content_to_json(content: Any) -> Any:
         return {"media": "document-url", "url": content.url}
     if isinstance(content, TextContent):
         return content.content
+    if isinstance(content, Mapping):
+        return {str(key): content_to_json(item) for key, item in content.items()}
     if isinstance(content, Sequence):
         return [content_to_json(element) for element in content]
     return to_json_value(content)
