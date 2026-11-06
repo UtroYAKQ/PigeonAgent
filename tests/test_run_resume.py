@@ -27,6 +27,7 @@ DANGEROUS_TOOL = "delete_file"
 
 class ApprovalAgent(BaseAgent):
     name: ClassVar[str] = "approval-http"
+    tool_names: ClassVar[tuple[str, ...]] = (DANGEROUS_TOOL,)
 
     def default_tools(self) -> list[Tool[Any]]:
         def delete_file(path: str) -> str:
@@ -37,6 +38,7 @@ class ApprovalAgent(BaseAgent):
 
 class ExternalCallAgent(BaseAgent):
     name: ClassVar[str] = "external-http"
+    tool_names: ClassVar[tuple[str, ...]] = ("fetch_price",)
 
     def default_tools(self) -> list[Tool[Any]]:
         def fetch_price(symbol: str) -> str:
@@ -47,6 +49,7 @@ class ExternalCallAgent(BaseAgent):
 
 class TwoApprovalsAgent(BaseAgent):
     name: ClassVar[str] = "two-approvals"
+    tool_names: ClassVar[tuple[str, ...]] = ("delete_file", "drop_table")
 
     def default_tools(self) -> list[Tool[Any]]:
         def delete_file(path: str) -> str:
@@ -63,6 +66,7 @@ class TwoApprovalsAgent(BaseAgent):
 
 class TwoCallsAgent(BaseAgent):
     name: ClassVar[str] = "two-calls"
+    tool_names: ClassVar[tuple[str, ...]] = ("fetch_a", "fetch_b")
 
     def default_tools(self) -> list[Tool[Any]]:
         def fetch_a(symbol: str) -> str:
@@ -76,6 +80,7 @@ class TwoCallsAgent(BaseAgent):
 
 class MixedAgent(BaseAgent):
     name: ClassVar[str] = "mixed-http"
+    tool_names: ClassVar[tuple[str, ...]] = (DANGEROUS_TOOL, "fetch_price")
 
     def default_tools(self) -> list[Tool[Any]]:
         def delete_file(path: str) -> str:
@@ -183,7 +188,11 @@ async def seed_session(
 
     resolved = ResolvedModel(
         name="approval-model",
-        model=TestModel() if call_tools else TestModel(call_tools=[]),
+        model=(
+            TestModel(call_tools=list(getattr(agent_cls, "tool_names", ())))
+            if call_tools
+            else TestModel(call_tools=[])
+        ),
         settings={},
         context_window=None,
         supports_tools=supports_tools,

@@ -71,7 +71,22 @@ class ResourceRef(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
 
 
-class RunCreate(BaseModel):
+class RunOptions(BaseModel):
+    """新建与续写共用的每轮选项；两边都允许覆盖同一组运行参数。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tools: list[FrontendTool] = Field(default_factory=list, max_length=10)
+    # 开启后把服务端 web_search / fetch_url 工具下发给模型
+    enable_web_search: bool = False
+    # 开启后才把 generate_image 工具下发给模型；平台总闸仍然优先
+    enable_image_generation: bool = True
+    # 指定用哪个图片模型；留空走默认模型
+    image_model_id: int | None = None
+    model_id: int | None = None
+
+
+class RunCreate(RunOptions):
     """开一轮 run。
 
     - `input`：新的用户消息，默认接在当前叶子后面。
@@ -82,22 +97,12 @@ class RunCreate(BaseModel):
     - `retry_run_id`：复制这条 run 的用户输入，并从它的父节点另起一条回答（重新生成）。
     """
 
-    model_config = ConfigDict(extra="forbid")
-
     input: str | None = Field(default=None, min_length=1)
     attachments: list[Attachment] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
     # 走 /files 上传后的文件引用；提示词里渲染成 <resource/> 标签
     resources: list[ResourceRef] = Field(default_factory=list, max_length=MAX_RESOURCES)
-    tools: list[FrontendTool] = Field(default_factory=list, max_length=10)
-    # 开启后把服务端 web_search / fetch_url 工具下发给模型
-    enable_web_search: bool = False
-    # 开启后才把 generate_image 工具下发给模型；平台总闸仍然优先
-    enable_image_generation: bool = True
-    # 指定用哪个图片模型；留空走默认模型
-    image_model_id: int | None = None
     parent_run_id: UUID | None = None
     retry_run_id: UUID | None = None
-    model_id: int | None = None
 
     @model_validator(mode="after")
     def _needs_something_to_run(self) -> Self:
@@ -121,23 +126,27 @@ class RunCreate(BaseModel):
         return "parent_run_id" in self.model_fields_set
 
 
-class RunResume(BaseModel):
+class RunResume(RunOptions):
     """恢复某个中断批次；审批只有 yes/no，外部调用直接给结果值。"""
-
-    model_config = ConfigDict(extra="forbid")
 
     interrupt_id: UUID
     approvals: dict[str, bool] = Field(default_factory=dict)
     calls: dict[str, Any] = Field(default_factory=dict)
-    tools: list[FrontendTool] = Field(default_factory=list, max_length=10)
-    enable_web_search: bool = False
-    enable_image_generation: bool = True
-    image_model_id: int | None = None
-    model_id: int | None = None
 
 
 class RunRead(BaseModel):
     run_id: str
+
+
+class CustomItemCreate(BaseModel):
+    """客户端只提交卡片内容；id、时间、展示开关由服务端生成。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    renderer: str = Field(min_length=1, max_length=64)
+    version: int = Field(default=1, ge=1)
+    data: Any = None
+    key: str | None = Field(default=None, max_length=128)
 
 
 class BranchNav(BaseModel):

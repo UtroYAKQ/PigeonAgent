@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.exceptions import ConfigurationError, GoneError, NotFoundError
 from app.core.security import decrypt_secret, encrypt_secret
+from app.domain.time import ensure_utc
 from app.models.session import ChatSession
 from app.models.session_share import SessionShare
 from app.schemas.session_share import ShareRead
@@ -29,11 +30,6 @@ SHARE_GONE_DETAIL = "分享链接已失效"
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
-
-def _aware(value: datetime) -> datetime:
-    """SQLite 读回的 DateTime(timezone=True) 不带 tz，按 UTC 处理。"""
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 def _require_key(settings: Settings) -> str:
@@ -85,7 +81,7 @@ async def list_shares(
     now = datetime.now(UTC)
     shares: list[ShareRead] = []
     for share, title in rows:
-        if _aware(share.expires_at) <= now:
+        if ensure_utc(share.expires_at) <= now:
             continue
         shares.append(
             ShareRead(
@@ -125,7 +121,7 @@ async def resolve_share(db: AsyncSession, token: str) -> tuple[SessionShare, Cha
     if share is None:
         raise GoneError(SHARE_GONE_DETAIL)
     session = await db.get(ChatSession, share.session_id)
-    if session is None or _aware(share.expires_at) <= datetime.now(UTC):
+    if session is None or ensure_utc(share.expires_at) <= datetime.now(UTC):
         raise GoneError(SHARE_GONE_DETAIL)
     # 读一次就记一次：分享页是只读的，这唯一一次写就是"有人看过"的全部信息
     share.visit_count += 1

@@ -16,13 +16,13 @@ from pydantic_ai import RunContext, ToolReturn
 from pydantic_ai.messages import BinaryContent
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.events import ImageGeneratedEvent
+from app.agents.events import ArtifactMedia, ImageGeneratedEvent
 from app.core.config import Settings
-from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
-from app.domain.media_type import detect_media_type
+from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef, parse_file_id
+from app.domain.media_type import detect_media_type, extension_for
 from app.infra.image_factory import ImageGenerationError, create_client
 from app.infra.storage import ObjectStorage, get_storage
-from app.sandbox.workspace import RunWorkspace, parse_storage_key
+from app.sandbox.workspace import RunWorkspace
 from app.services import billing, file_service
 from app.services import image_model as image_model_service
 
@@ -36,7 +36,7 @@ def make_generate_image(
     *,
     owner_id: UUID | None,
     settings: Settings,
-    run_id: Callable[[], UUID | None],
+    run_id: UUID | None,
     image_model_id: int | None = None,
 ) -> GenerateImageTool:
     """闭包捕获运行期依赖；工具签名只有模型看得懂的参数。"""
@@ -80,7 +80,7 @@ def make_generate_image(
         saved: list[dict[str, Any]] = []
         alt = prompt.strip()[:80]
         for image in images:
-            name = f"generated-{uuid4().hex[:10]}.{_extension(image.media_type)}"
+            name = f"generated-{uuid4().hex[:10]}.{extension_for(image.media_type)}"
             async with session_factory() as db:
                 file = await file_service.direct_upload(
                     db,
@@ -105,11 +105,14 @@ def make_generate_image(
             # 逐张通知 turn 落库并推给前端；工具本身不碰 run content
             await ctx.emit(
                 ImageGeneratedEvent(
-                    file_id=file_id,
-                    file_name=name,
-                    media_type=image.media_type,
-                    size=size_bytes,
-                    alt=alt,
+                    media=ArtifactMedia(
+                        file_id=file_id,
+                        name=name,
+                        media_type=image.media_type,
+                        size=size_bytes,
+                        alt=alt,
+                        origin="generated",
+                    )
                 )
             )
 
@@ -123,7 +126,7 @@ def make_generate_image(
                         user_id=owner_id,
                         model=record,
                         count=len(saved),
-                        run_id=run_id(),
+                        run_id=run_id,
                     )
             except Exception:
                 logger.exception("Image billing failed for %s images", len(saved))
@@ -169,15 +172,17 @@ def make_read_image(
         if not target:
             return _error("source 不能为空")
 
-        file_id = parse_storage_key(target)
+        file_id = parse_file_id(target)
         if file_id is not None:
             try:
                 async with session_factory() as db:
-                    data, name, _, _ = await file_service.content_of(db, storage, owner_id, file_id)
+                    data, name, media_type, _ = await file_service.content_of(
+                        db, storage, owner_id, file_id
+                    )
             except Exception as exc:
                 logger.warning("read_image failed for %s: %s", target, exc)
                 return _error(_reason(exc))
-            return _image_result(str(file_id), name, data, settings)
+            return _image_result(str(file_id), name, media_type, data, settings)
 
         if workspace is None:
             return _error("当前会话没有工作区，只能用 file_id 读取图片")
@@ -198,13 +203,14 @@ def make_read_image(
         except Exception as exc:
             logger.warning("read_image upload failed for %s: %s", target, exc)
             return _error(_reason(exc))
-        return _image_result(str(record.id), record.name, data, settings)
+        return _image_result(str(record.id), record.name, media_type, data, settings)
 
     return read_image
 
 
-def _image_result(file_id: str, name: str, data: bytes, settings: Settings) -> ToolReturn:
-    media_type = detect_media_type(name, data)
+def _image_result(
+    file_id: str, name: str, media_type: str, data: bytes, settings: Settings
+) -> ToolReturn:
     if media_type not in _READABLE_IMAGE_TYPES:
         return _error("不是受支持的图片格式；read_image 只读 PNG/JPEG/WebP/GIF")
     if len(data) > settings.max_upload_bytes:
@@ -228,7 +234,3 @@ def _reason(exc: Exception) -> str:
 
 
 _READABLE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-
-
-def _extension(media_type: str) -> str:
-    return {"image/jpeg": "jpg", "image/webp": "webp"}.get(media_type, "png")

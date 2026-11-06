@@ -380,6 +380,7 @@ async def test_execute_run_pumps_events_and_persists_messages(
         session_factory=db_session_factory,
         session_id=created.id,
         run_id=run_id,
+        owner_id=TEST_USER_ID,
         resolved=resolved,
         model_id=None,
     )
@@ -434,6 +435,7 @@ async def test_execute_run_marks_message_failed_on_error(
         session_factory=db_session_factory,
         session_id=created.id,
         run_id=run_id,
+        owner_id=TEST_USER_ID,
         resolved=resolved,
         model_id=None,
     )

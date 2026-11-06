@@ -63,16 +63,17 @@ def test_text_read_beyond_eof_and_binary_reject() -> None:
 # ------------------------------------------------------------------ LocalWorkspace
 
 
-async def test_put_file_dedups_name_and_read_write_roundtrip(tmp_path: Path) -> None:
+async def test_put_file_overwrites_and_read_write_roundtrip(tmp_path: Path) -> None:
     ws = _local(tmp_path)
     first = await ws.put_file("报告.md", "内容一")
     assert first["saved_as"] == "报告.md"
+    assert first["size"] == len("内容一".encode())
     second = await ws.put_file("报告.md", "内容二")
-    assert second["saved_as"] == "报告 (1).md"
+    assert second["saved_as"] == "报告.md"
     listed = await ws.list_files()
-    assert {f["path"] for f in listed["files"]} == {"报告.md", "报告 (1).md"}
+    assert {f["path"] for f in listed["entries"]} == {"报告.md"}
     text = await ws.read_file("报告.md")
-    assert any("内容一" in line for line in text["lines"])
+    assert any("内容二" in line for line in text["lines"])
     again = await ws.read_file("不存在.md")
     assert "error" in again
 
@@ -151,7 +152,7 @@ async def test_tool_bundle_enables_read_image_only_with_storage_and_vision(
             session_factory=db_session_factory,
             owner_id=None,
             settings=settings,
-            run_id=lambda: None,
+            run_id=None,
             image_model_id=None,
             enable_image_generation=False,
             enable_web_search=False,
@@ -198,11 +199,16 @@ async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> N
     assert "对象存储未启用" in (await publish_bare.function(_Ctx(), "a.txt"))["error"]
 
 
-async def test_list_files_nests_and_errors(tmp_path: Path) -> None:
+async def test_list_files_lists_direct_children_and_errors(tmp_path: Path) -> None:
     ws = _local(tmp_path)
     await ws.put_file("notes/a.md", "hi")
+    await ws.put_file("root.txt", "hi")
     nested = await ws.list_files("notes")
-    assert nested["files"][0]["path"] == "notes/a.md"
+    assert nested["directory"] == "notes"
+    assert [entry["name"] for entry in nested["entries"]] == ["a.md"]
+    root = await ws.list_files()
+    assert {entry["name"] for entry in root["entries"]} == {"notes", "root.txt"}
+    assert next(entry for entry in root["entries"] if entry["name"] == "notes")["directory"] is True
     missing = await ws.list_files("nope")
     assert "error" in missing
 
@@ -215,24 +221,38 @@ class _FakeFormats:
 
     def __init__(self) -> None:
         self.written: dict[str, bytes] = {}
-        self.objects: list[dict[str, str]] = []
+        self.dirs: set[str] = set()
+        self.reads: list[str] = []
 
     async def make_dir(self, path: str) -> None:
-        self.objects.append({"path": path})
+        self.dirs.add(path)
 
     async def write(self, path: str, data: bytes, request_timeout: float | None = None) -> None:
         self.written[path] = data
 
     async def read(self, path: str, format: str = "text") -> bytes:
+        self.reads.append(path)
         if path not in self.written:
             raise OSError(f"no file {path}")
         return self.written[path]
 
-    async def list(self, path: str) -> list[Any]:
-        class Entry(SimpleNamespace):
-            pass
+    async def get_info(self, path: str) -> Any:
+        if path not in self.written:
+            raise OSError(f"no file {path}")
+        return SimpleNamespace(name=path.rsplit("/", 1)[-1], size=len(self.written[path]))
 
-        return [Entry(name=obj["path"], is_dir=False) for obj in self.objects]
+    async def list(self, path: str) -> list[Any]:
+        prefix = path.rstrip("/") + "/"
+        entries: dict[str, bool] = {}
+        for full in [*self.written, *self.dirs]:
+            if not full.startswith(prefix):
+                continue
+            rest = full[len(prefix) :]
+            if not rest:
+                continue
+            name, sep, _ = rest.partition("/")
+            entries[name] = entries.get(name, False) or bool(sep) or full in self.dirs
+        return [SimpleNamespace(name=name, is_dir=is_dir) for name, is_dir in entries.items()]
 
 
 class _FakeCommands:
@@ -273,7 +293,7 @@ def _record(
     return record
 
 
-async def test_sandbox_resolve_keys_writes_storage_bytes(db_session: AsyncSession) -> None:
+async def test_sandbox_resolve_files_writes_storage_bytes(db_session: AsyncSession) -> None:
     """load_files 从对象存储取字节，再经 files.write 推到 envd。"""
     body = "文件内容".encode()
     record = _record(db_session, "说明.txt", body)
@@ -286,7 +306,7 @@ async def test_sandbox_resolve_keys_writes_storage_bytes(db_session: AsyncSessio
 
     sandbox = _FakeSandbox()
     ws = SandboxWorkspace(storage, uuid.uuid4(), "run-3", sandbox)
-    entries = await ws.resolve_keys(db_session, [str(record.id), "not-a-uuid"])
+    entries = await ws.resolve_files(db_session, [str(record.id), "not-a-uuid"])
 
     assert entries[0]["saved_as"] == "说明.txt"
     assert entries[0]["size"] == len(body)
@@ -295,13 +315,13 @@ async def test_sandbox_resolve_keys_writes_storage_bytes(db_session: AsyncSessio
     assert "error" in entries[1]
 
 
-async def test_sandbox_resolve_keys_reports_storage_failure(db_session: AsyncSession) -> None:
+async def test_sandbox_resolve_files_reports_storage_failure(db_session: AsyncSession) -> None:
     record = _record(db_session, "missing.txt", b"gone")
     await db_session.commit()
 
     sandbox = _FakeSandbox()
     ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-4", sandbox)
-    entries = await ws.resolve_keys(db_session, [str(record.id)])
+    entries = await ws.resolve_files(db_session, [str(record.id)])
 
     assert "读取对象存储失败" in entries[0]["error"]
     assert sandbox.files.written == {}
@@ -312,7 +332,7 @@ class _BrokenFiles(_FakeFormats):
         raise OSError("envd down")
 
 
-async def test_sandbox_resolve_keys_reports_write_failure(db_session: AsyncSession) -> None:
+async def test_sandbox_resolve_files_reports_write_failure(db_session: AsyncSession) -> None:
     body = b"x"
     record = _record(db_session, "x.txt", body)
     await db_session.commit()
@@ -325,18 +345,18 @@ async def test_sandbox_resolve_keys_reports_write_failure(db_session: AsyncSessi
     sandbox = _FakeSandbox()
     sandbox.files = _BrokenFiles()
     ws = SandboxWorkspace(storage, uuid.uuid4(), "run-5", sandbox)
-    entries = await ws.resolve_keys(db_session, [str(record.id)])
+    entries = await ws.resolve_files(db_session, [str(record.id)])
 
     assert "写入沙箱失败" in entries[0]["error"]
 
 
-async def test_sandbox_resolve_keys_rejects_other_owner(db_session: AsyncSession) -> None:
+async def test_sandbox_resolve_files_rejects_other_owner(db_session: AsyncSession) -> None:
     record = _record(db_session, "private.txt", b"secret", owner_id=uuid.uuid4())
     await db_session.commit()
 
     sandbox = _FakeSandbox()
     ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-owner", sandbox)
-    entries = await ws.resolve_keys(db_session, [str(record.id)], owner_id=uuid.uuid4())
+    entries = await ws.resolve_files(db_session, [str(record.id)], owner_id=uuid.uuid4())
 
     assert entries[0]["error"] == "文件不存在或已被删除"
     assert sandbox.files.written == {}
@@ -347,12 +367,40 @@ async def test_sandbox_workspace_write_read() -> None:
     ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-9", sandbox)
     saved = await ws.put_file("out.md", "沙箱产物")
     assert saved["saved_as"] == "out.md"
+    assert saved["size"] == len("沙箱产物".encode())
     assert sandbox.files.written[f"{ws.root}/out.md"] == "沙箱产物".encode()
     text = await ws.read_file("out.md")
     assert any("沙箱产物" in line for line in text["lines"])
     assert await ws.read_binary("out.md") == "沙箱产物".encode()
     commands = await ws.run_command("ls", 30)
     assert commands["exit_code"] == 0
+
+
+async def test_sandbox_list_files_lists_direct_children() -> None:
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-list", _FakeSandbox())
+    await ws.put_file("notes/a.md", "hi")
+    await ws.put_file("root.txt", "hi")
+
+    root = await ws.list_files()
+    assert root["directory"] == "."
+    assert {entry["name"]: entry["directory"] for entry in root["entries"]} == {
+        "notes": True,
+        "root.txt": False,
+    }
+    nested = await ws.list_files("notes")
+    assert nested["directory"] == "notes"
+    assert [entry["name"] for entry in nested["entries"]] == ["a.md"]
+
+
+async def test_sandbox_read_binary_checks_size_before_reading() -> None:
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-size", sandbox)
+    await ws.put_file("big.bin", "0123456789")
+
+    with pytest.raises(WorkspaceError, match="上限"):
+        await ws.read_binary("big.bin", max_bytes=5)
+    assert sandbox.files.reads == []
+    assert await ws.read_binary("big.bin", max_bytes=10) == b"0123456789"
 
 
 async def test_sandbox_workspace_starts_lazily_and_reuses() -> None:
@@ -390,7 +438,7 @@ async def test_default_run_command_is_unavailable(tmp_path: Path) -> None:
 
 async def test_load_files_absent_without_storage(tmp_path: Path) -> None:
     ws = LocalWorkspace(SimpleNamespace(workspace_root=str(tmp_path)), None, uuid.uuid4(), "run-2")
-    result = await ws.resolve_keys(None, ["abc"])
+    result = await ws.resolve_files(None, ["abc"])
     assert "对象存储未启用" in result[0]["error"]
 
 

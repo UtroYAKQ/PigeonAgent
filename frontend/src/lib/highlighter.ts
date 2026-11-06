@@ -162,7 +162,7 @@ export function startHighlighter(): void {
   void ensureHighlighter()
 }
 
-export function loadedHighlighter(): HighlighterCore | null {
+function loadedHighlighter(): HighlighterCore | null {
   return instance
 }
 

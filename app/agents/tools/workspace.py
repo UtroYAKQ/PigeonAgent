@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.events import ArtifactEvent, ArtifactMedia
 from app.core.config import Settings
-from app.domain.media_type import detect_media_type
+from app.domain.media_type import effective_media_type
 from app.sandbox.workspace import RunWorkspace, SandboxWorkspace, WorkspaceError
 from app.services import file_service
 
@@ -41,7 +41,7 @@ def workspace_tools(
         """
         try:
             async with factory() as db:
-                entries = await workspace.resolve_keys(db, storage_keys, owner_id=owner_id)
+                entries = await workspace.resolve_files(db, storage_keys, owner_id=owner_id)
         except Exception as exc:
             return {"loaded": [], **_fail("load_files", exc)}
         return {"loaded": entries}
@@ -51,7 +51,7 @@ def workspace_tools(
 
         Args:
             name: 相对工作区根的文件名，比如 report.md。
-            content: 完整的文本内容；重复写同名文件会存成 `名 (1).后缀`。
+            content: 完整的文本内容；同名文件会被覆盖。
         """
         try:
             result = await workspace.put_file(name, content)
@@ -74,10 +74,10 @@ def workspace_tools(
         return result
 
     async def list_files(subdir: str = ".") -> dict[str, Any]:
-        """列工作区目录的内容。
+        """列工作区某个目录的直接子项。
 
         Args:
-            subdir: 相对工作区根的目录，默认整棵工作区。
+            subdir: 相对工作区根的目录，默认根目录。
         """
         try:
             result = await workspace.list_files(subdir)
@@ -99,15 +99,15 @@ def workspace_tools(
         except Exception as exc:
             return _fail("publish_file", exc)
         name = PurePosixPath(str(path).replace("\\", "/")).name or "file"
-        mime = detect_media_type(name, data)
         try:
             async with factory() as db:
+                # 类型交给 direct_upload 统一探测；入库后 FileRecord 就是唯一权威
                 record = await file_service.direct_upload(
-                    db, settings, store, owner_id, name, mime, data
+                    db, settings, store, owner_id, name, None, data
                 )
         except Exception as exc:
             return _fail("publish_file", exc)
-        media_type = record.content_type or mime
+        media_type = effective_media_type(record.name, record.content_type)
         # 产物卡片由工具直接推给前端；ResourceItem 由 turn 从事件落库
         await ctx.emit(
             ArtifactEvent(

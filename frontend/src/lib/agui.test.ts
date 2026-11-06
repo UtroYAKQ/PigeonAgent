@@ -37,16 +37,26 @@ const usage = {
 
 function generated(fileId: string) {
   return {
-    file_id: fileId,
-    file_name: `${fileId}.png`,
-    media_type: 'image/png',
-    size: 1024,
-    alt: null,
+    media: {
+      file_id: fileId,
+      name: `${fileId}.png`,
+      media_type: 'image/png',
+      size: 1024,
+      alt: null,
+      origin: 'generated',
+    },
   }
 }
 
 function media(fileId: string): LiveMedia {
-  return { file_id: fileId, media_type: 'image/png', name: `${fileId}.png`, size: 1024, alt: null }
+  return {
+    file_id: fileId,
+    media_type: 'image/png',
+    name: `${fileId}.png`,
+    size: 1024,
+    alt: null,
+    origin: 'workspace',
+  }
 }
 
 describe('applyAgUiEvent run 生命周期', () => {

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, h, nextTick, ref, watch } from 'vue'
-import { Check, ChevronDown, Circle, CircleAlert, CircleSlash, ListChecks, Loader2 } from '@lucide/vue'
+import { Check, ChevronDown, CircleAlert, CircleSlash, Loader2 } from '@lucide/vue'
 
 import { formatDuration } from '@/lib/format'
-import type { PlanState, ToolStep } from '@/lib/tools'
+import type { ToolStep } from '@/lib/tools'
 import type { ChainEntry } from '@/lib/turnModel'
 import type { RunStatus } from '@/types/api'
 import SonarDot from './SonarDot.vue'
@@ -19,7 +19,6 @@ const ToolOutput = defineAsyncComponent({
 const props = withDefaults(
   defineProps<{
     chain: ChainEntry[]
-    plan: PlanState | null
     isStreaming: boolean
     status: RunStatus | 'streaming'
     startedAt?: string | null
@@ -65,14 +64,7 @@ const steps = computed(() => props.chain.flatMap(entry => (entry.kind === 'tool'
 const failedSteps = computed(() => steps.value.filter(step => step.state === 'failed'))
 const succeededSteps = computed(() => steps.value.filter(step => step.state === 'success'))
 
-const displayChain = computed(() => {
-  if (!props.plan) return props.chain
-  return props.chain.filter(entry =>
-    entry.kind !== 'tool' || (entry.step.name !== 'plan_set' && entry.step.name !== 'plan_show'),
-  )
-})
-
-const hasContent = computed(() => Boolean(props.chain.length || props.plan))
+const hasContent = computed(() => Boolean(props.chain.length))
 
 const activeStep = computed(() => steps.value.find(step => step.state === 'running' || step.state === 'waiting'))
 
@@ -87,7 +79,6 @@ const activeReasoning = computed(() => {
 const headerLabel = computed(() => {
   if (props.isStreaming) {
     if (activeStep.value) return activeStep.value.label
-    if (props.plan) return '正在执行计划'
     if (activeReasoning.value?.streaming) return '正在思考'
     return '正在生成回复'
   }
@@ -98,12 +89,8 @@ const headerLabel = computed(() => {
     return steps.value.length ? `已暂停 · ${steps.value.length} 个步骤` : '等待后续操作'
   }
   const duration = props.startedAt ? formatDuration(props.startedAt, props.endedAt) : null
-  if (props.plan && !steps.value.length) {
-    return `执行计划 ${props.plan.progress}${duration ? ` · 用时 ${duration}` : ''}`
-  }
   if (steps.value.length) {
-    const plan = props.plan ? ` · 计划 ${props.plan.progress}` : ''
-    return `已完成 ${steps.value.length} 个步骤${plan}${duration ? ` · 用时 ${duration}` : ''}`
+    return `已完成 ${steps.value.length} 个步骤${duration ? ` · 用时 ${duration}` : ''}`
   }
   return `思考过程${duration ? ` · 用时 ${duration}` : ''}`
 })
@@ -216,35 +203,12 @@ watch(
     </button>
 
     <div v-show="open" class="mt-3 pl-[3px]">
-      <div v-if="plan" class="mb-4 rounded-xl border border-border/80 bg-surface/60 px-4 py-3.5">
-        <div class="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <ListChecks class="size-3.5" />
-          <span>执行计划</span>
-          <span class="ml-auto font-mono text-[10.5px]">{{ plan.progress }}</span>
-        </div>
-        <ul class="mt-2.5 space-y-2">
-          <li
-            v-for="item in plan.items"
-            :key="item.index"
-            class="flex items-start gap-2 text-[13.5px] leading-5"
-            :class="item.status === 'active' ? 'text-foreground' : item.status === 'done' ? 'text-muted-foreground' : 'text-muted-foreground/65'"
-          >
-            <span class="mt-[3px] grid size-3.5 shrink-0 place-items-center">
-              <Check v-if="item.status === 'done'" class="size-3.5" :stroke-width="2" />
-              <SonarDot v-else-if="item.status === 'active'" :size="6" />
-              <Circle v-else class="size-3" :stroke-width="1.6" />
-            </span>
-            <span class="min-w-0">{{ item.content }}</span>
-          </li>
-        </ul>
-      </div>
-
       <ol class="relative">
         <li
-          v-for="(entry, index) in displayChain"
+          v-for="(entry, index) in chain"
           :key="entry.kind === 'reasoning' ? `reasoning-${entry.id}` : `tool-${entry.step.id}`"
           class="relative flex gap-2.5"
-          :class="index === displayChain.length - 1 && !isStreaming ? 'pb-0' : 'pb-3.5'"
+          :class="index === chain.length - 1 && !isStreaming ? 'pb-0' : 'pb-3.5'"
         >
           <div class="relative flex w-3.5 shrink-0 flex-col items-center pt-[7px]">
             <template v-if="entry.kind === 'reasoning'">

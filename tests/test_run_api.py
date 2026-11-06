@@ -326,7 +326,7 @@ async def test_custom_item_only_out_of_context(
 
     response = await client.post(
         f"/api/v1/sessions/{session_id}/runs/{run['id']}/items",
-        json={"type": "custom", "renderer": "status-card", "data": {"title": "卡片"}},
+        json={"renderer": "status-card", "data": {"title": "卡片"}},
     )
     assert response.status_code == 201, response.text
     content = response.json()["content"]
@@ -336,6 +336,12 @@ async def test_custom_item_only_out_of_context(
 
     context = await client.get(f"/api/v1/sessions/{session_id}/context")
     assert "卡片" not in str(context.json()["messages"])
+
+    rejected = await client.post(
+        f"/api/v1/sessions/{session_id}/runs/{run['id']}/items",
+        json={"renderer": "status-card", "id": str(uuid4())},
+    )
+    assert rejected.status_code == 422
 
 
 async def test_custom_item_conflicts_with_live_run(
@@ -353,7 +359,7 @@ async def test_custom_item_conflicts_with_live_run(
 
     response = await client.post(
         f"/api/v1/sessions/{session_id}/runs/{run.id}/items",
-        json={"type": "custom", "renderer": "status-card"},
+        json={"renderer": "status-card"},
     )
     assert response.status_code == 409
 

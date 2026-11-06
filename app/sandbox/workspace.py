@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import contextlib
 import logging
 import shutil
 import uuid
@@ -18,8 +19,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from app.core.config import Settings
-from app.infra.file_records import resolve_owned_resources
-from app.infra.storage import ObjectStorage, safe_name
+from app.domain.file_ref import parse_file_id
+from app.infra.file_records import resolve_owned_files
+from app.infra.storage import ObjectStorage
 from app.models.blob import Blob
 from app.models.file_record import FileRecord
 
@@ -45,13 +47,6 @@ class WorkspaceError(Exception):
     """工具层统一往外的失败形状：调用方转成 {"error": ...} 喂回模型。"""
 
 
-def parse_storage_key(key: str) -> uuid.UUID | None:
-    try:
-        return uuid.UUID(str(key).strip())
-    except ValueError:
-        return None
-
-
 def _relative_clean(name: str) -> PurePosixPath | None:
     """工作区里的相对路径：不许裸空、绝对路径、路径穿越。"""
     cleaned = (name or "").strip().replace("\\", "/")
@@ -61,15 +56,15 @@ def _relative_clean(name: str) -> PurePosixPath | None:
     return pure
 
 
-def _unique(path: Path) -> Path:
-    """不覆盖已有文件：加 (1)、(2) 后缀。"""
-    if not path.exists():
-        return path
-    stem, suffix = path.stem, path.suffix
+def _unique_name(name: str, used: set[str]) -> str:
+    """批次内重名时加 (1)、(2) 后缀，两套工作区共用同一命名规则。"""
+    if name not in used:
+        return name
+    pure = PurePosixPath(name)
     index = 1
     while True:
-        candidate = path.with_name(f"{stem} ({index}){suffix}")
-        if not candidate.exists():
+        candidate = f"{pure.stem} ({index}){pure.suffix}"
+        if candidate not in used:
             return candidate
         index += 1
 
@@ -126,10 +121,10 @@ class RunWorkspace(abc.ABC):
         """工具活动钩子，沙箱模式刷新空闲计时，本地模式无事可做。"""
 
     @abc.abstractmethod
-    async def resolve_keys(
-        self, db: AsyncSession, keys: list[str], *, owner_id: uuid.UUID | None = None
+    async def resolve_files(
+        self, db: AsyncSession, file_ids: list[str], *, owner_id: uuid.UUID | None = None
     ) -> list[dict[str, Any]]:
-        """storage_keys → 实体化记录；只允许会话主人自己的文件。"""
+        """file_id → 实体化记录；只允许会话主人自己的文件。"""
 
     @abc.abstractmethod
     async def put_file(self, name: str, content: str) -> dict[str, Any]: ...
@@ -153,20 +148,21 @@ class RunWorkspace(abc.ABC):
 
 async def _materialize_load_batch(
     db: AsyncSession,
-    keys: list[str],
+    file_ids: list[str],
     owner_id: uuid.UUID | None,
-    persist: Callable[[str, FileRecord, Blob], Awaitable[dict[str, Any]]],
+    persist: Callable[[str, FileRecord, Blob, str], Awaitable[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    """load_files 的共用流程：批次截断、owner 过滤、Blob 校验和失败行构造。
+    """load_files 的共用流程：批次截断、owner 过滤、Blob 校验、重名和失败行构造。
 
     两种工作区只有「字节落到哪」不同（本地写目录 / 沙箱推远端），其余逐字一致，
     差异收进 persist 回调；persist 返回这一条 key 的成功或失败条目。
     """
-    resolved = await resolve_owned_resources(db, keys, owner_id=owner_id)
+    resolved = await resolve_owned_files(db, file_ids, owner_id=owner_id)
     entries: list[dict[str, Any]] = []
-    for key in keys[:_MAX_LOAD_BATCH]:
-        key = key.strip()
-        parsed = parse_storage_key(key)
+    used_names: set[str] = set()
+    for file_id in file_ids[:_MAX_LOAD_BATCH]:
+        key = file_id.strip()
+        parsed = parse_file_id(key)
         record = resolved.get(parsed) if parsed is not None else None
         if record is None:
             entries.append({"storage_key": key, "error": "文件不存在或已被删除"})
@@ -175,8 +171,10 @@ async def _materialize_load_batch(
         if blob is None:
             entries.append({"storage_key": key, "error": "文件内容已被清理"})
             continue
-        entries.append(await persist(key, record, blob))
-    if len(keys) > _MAX_LOAD_BATCH:
+        name = _unique_name(record.name, used_names)
+        used_names.add(name)
+        entries.append(await persist(key, record, blob, name))
+    if len(file_ids) > _MAX_LOAD_BATCH:
         entries.append({"error": f"一次最多加载 {_MAX_LOAD_BATCH} 个文件，多出的已忽略"})
     return entries
 
@@ -208,17 +206,22 @@ class LocalWorkspace(RunWorkspace):
         return self.root / Path(*pure.parts)
 
     # ------------------------------------------------------------------ 动作
-    async def resolve_keys(
-        self, db: AsyncSession, keys: list[str], *, owner_id: uuid.UUID | None = None
+    async def resolve_files(
+        self, db: AsyncSession, file_ids: list[str], *, owner_id: uuid.UUID | None = None
     ) -> list[dict[str, Any]]:
         store = self.storage
         if store is None:
-            return [{"storage_key": k, "error": "对象存储未启用，无法加载文件"} for k in keys]
+            return [{"storage_key": k, "error": "对象存储未启用，无法加载文件"} for k in file_ids]
 
-        async def persist(key: str, record: FileRecord, blob: Blob) -> dict[str, Any]:
+        async def persist(key: str, record: FileRecord, blob: Blob, name: str) -> dict[str, Any]:
             data = await store.get(blob.storage_key)
-            target = await asyncio.to_thread(_unique, self._safe(record.name))
-            await asyncio.to_thread(target.write_bytes, data)
+            target = self._safe(name)
+
+            def _write() -> None:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+
+            await asyncio.to_thread(_write)
             return {
                 "storage_key": key,
                 "original_name": record.name,
@@ -226,13 +229,13 @@ class LocalWorkspace(RunWorkspace):
                 "size": len(data),
             }
 
-        return await _materialize_load_batch(db, keys, owner_id, persist)
+        return await _materialize_load_batch(db, file_ids, owner_id, persist)
 
     async def put_file(self, name: str, content: str) -> dict[str, Any]:
         data = content.encode("utf-8")
 
         def _write() -> Path:
-            target = _unique(self._safe(name))
+            target = self._safe(name)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
             return target
@@ -264,8 +267,8 @@ class LocalWorkspace(RunWorkspace):
         base_dir = self.root / Path(*pure.parts)
         if not base_dir.is_dir():
             return {"error": f"{subdir} 不是工作区里的目录"}
-        files = await asyncio.to_thread(_list_dir, self.root, base_dir)
-        return {"files": files[:_MAX_LIST_ENTRIES], "total": len(files)}
+        entries = await asyncio.to_thread(_list_children, self.root, base_dir)
+        return {"directory": pure.as_posix(), "entries": entries[:_MAX_LIST_ENTRIES]}
 
     async def cleanup(self) -> None:
         """本轮结束不清目录：目录是按会话分的，删了等于把上一轮写的文件也删了。
@@ -274,16 +277,18 @@ class LocalWorkspace(RunWorkspace):
         """
 
 
-def _list_dir(root: Path, base_dir: Path) -> list[dict[str, Any]]:
-    """rglob + stat 是同步遍历，统一在 to_thread 里跑。"""
-    return [
+def _list_children(root: Path, base_dir: Path) -> list[dict[str, Any]]:
+    """只列直接子项；stat 是同步调用，统一在 to_thread 里跑。"""
+    entries: list[dict[str, Any]] = [
         {
+            "name": child.name,
             "path": child.relative_to(root).as_posix(),
-            "size": child.stat().st_size,
+            "directory": child.is_dir(),
         }
-        for child in sorted(base_dir.rglob("*"))
-        if child.is_file()
+        for child in base_dir.iterdir()
     ]
+    entries.sort(key=lambda item: (not item["directory"], item["name"].casefold()))
+    return entries
 
 
 def local_workspace_root(settings: Settings, session_id: uuid.UUID) -> Path:
@@ -353,14 +358,13 @@ class SandboxWorkspace(RunWorkspace):
         return self.path_in(name).as_posix()
 
     # ------------------------------------------------------------------ 动作
-    async def resolve_keys(
-        self, db: AsyncSession, keys: list[str], *, owner_id: uuid.UUID | None = None
+    async def resolve_files(
+        self, db: AsyncSession, file_ids: list[str], *, owner_id: uuid.UUID | None = None
     ) -> list[dict[str, Any]]:
         self._mark()
         sandbox = await self._ensure_sandbox()
 
-        async def persist(key: str, record: FileRecord, blob: Blob) -> dict[str, Any]:
-            name = safe_name(record.name)
+        async def persist(key: str, record: FileRecord, blob: Blob, name: str) -> dict[str, Any]:
             target = self._abs(name)
             try:
                 data = await self.storage.get(blob.storage_key)
@@ -389,7 +393,7 @@ class SandboxWorkspace(RunWorkspace):
                 "size": blob.size,
             }
 
-        return await _materialize_load_batch(db, keys, owner_id, persist)
+        return await _materialize_load_batch(db, file_ids, owner_id, persist)
 
     async def put_file(self, name: str, content: str) -> dict[str, Any]:
         self._mark()
@@ -398,8 +402,13 @@ class SandboxWorkspace(RunWorkspace):
             raise WorkspaceError(f"非法路径：{name!r}")
         sandbox = await self._ensure_sandbox()
         target = Path(self.root) / Path(*pure.parts)
-        await sandbox.files.write(target.as_posix(), content.encode("utf-8"))
-        return {"saved_as": pure.as_posix()}
+        if target.parent != Path(self.root):
+            # 目录已存在时 make_dir 可能报错；真正的写入失败由 files.write 返回
+            with contextlib.suppress(Exception):
+                await sandbox.files.make_dir(target.parent.as_posix())
+        data = content.encode("utf-8")
+        await sandbox.files.write(target.as_posix(), data)
+        return {"saved_as": pure.as_posix(), "size": len(data)}
 
     async def read_file(self, name: str, offset: int = 1, limit: int = 200) -> dict[str, Any]:
         self._mark()
@@ -416,28 +425,42 @@ class SandboxWorkspace(RunWorkspace):
         target = self._abs(name)
         sandbox = await self._ensure_sandbox()
         try:
+            # 先查大小再读，别把超限大文件整份拉进后端内存；顺序与本地工作区一致
+            if max_bytes is not None:
+                info = await sandbox.files.get_info(target)
+                if info.size > max_bytes:
+                    raise WorkspaceError(f"{name} 超过 {max_bytes // 1024 // 1024} MB 上限")
             raw = await sandbox.files.read(target, format="bytes")
+        except WorkspaceError:
+            raise
         except Exception as exc:
             raise WorkspaceError(f"沙箱里读不到 {name}；先用 load_files 或 write_file") from exc
-        data = bytes(raw)
-        if max_bytes is not None and len(data) > max_bytes:
-            raise WorkspaceError(f"{name} 超过 {max_bytes // 1024 // 1024} MB 上限")
-        return data
+        return bytes(raw)
 
     async def list_files(self, subdir: str = ".") -> dict[str, Any]:
         self._mark()
+        pure = _relative_clean(subdir)
+        if pure is None:
+            return {"error": f"非法路径：{subdir!r}"}
         sandbox = await self._ensure_sandbox()
         try:
-            entries = await sandbox.files.list(self.path_in(subdir).as_posix())
+            raw = await sandbox.files.list(self.path_in(subdir).as_posix())
         except Exception:
             return {"error": f"沙箱里读不到目录 {subdir}"}
-        out = []
-        for entry in entries:
+        entries: list[dict[str, Any]] = []
+        for entry in raw:
             name = getattr(entry, "name", None)
-            if name is None:
+            if not name:
                 continue
-            out.append({"name": name, "directory": getattr(entry, "is_dir", False)})
-        return {"directory": str(subdir), "entries": out[:_MAX_LIST_ENTRIES]}
+            entries.append(
+                {
+                    "name": name,
+                    "path": (pure / name).as_posix(),
+                    "directory": bool(getattr(entry, "is_dir", False)),
+                }
+            )
+        entries.sort(key=lambda item: (not item["directory"], item["name"].casefold()))
+        return {"directory": pure.as_posix(), "entries": entries[:_MAX_LIST_ENTRIES]}
 
     async def run_command(self, command: str, timeout_seconds: int = 120) -> dict[str, Any]:
         self._mark()

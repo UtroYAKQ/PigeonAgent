@@ -21,6 +21,7 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import ConfigurationError, UnprocessableError
 from app.core.redaction import redact_text
 from app.core.security import decrypt_secret
+from app.domain.media_type import detect_media_type
 from app.enums import ImageProvider
 from app.infra.image_presets import preset_of, resolve_base_url
 from app.models.image_model import ImageModel
@@ -196,8 +197,10 @@ async def _download_remote_image(client: httpx.AsyncClient, url: str) -> tuple[b
                 if len(body) + len(chunk) > MAX_IMAGE_DOWNLOAD_BYTES:
                     raise ValueError("generated image is too large")
                 body.extend(chunk)
-            media_type = response.headers.get("content-type", "image/png")
-            normalized = media_type.split(";", 1)[0].strip() or "image/png"
+            media_type = response.headers.get("content-type", "")
+            normalized = media_type.split(";", 1)[0].strip()
+            if not normalized.startswith("image/"):
+                normalized = _sniff_media_type(bytes(body))
             return bytes(body), normalized
     raise ValueError("too many image redirects")
 
@@ -259,13 +262,8 @@ def _is_public_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -
 
 
 def _sniff_media_type(data: bytes) -> str:
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image/png"
-    if data.startswith(b"\xff\xd8\xff"):
-        return "image/jpeg"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return "image/png"
+    detected = detect_media_type(None, data)
+    return detected if detected.startswith("image/") else "image/png"
 
 
 def _readable_error(exc: Exception) -> str:

@@ -3,29 +3,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { ERROR_CODES } from '@/lib/errorPages'
 import { useAuthStore } from '@/stores/auth'
 
-/**
- * 后台页从 /settings 搬进了 /admin，旧地址一律保留跳转，免得书签和分享出去的链接失效。
- * 值是 /admin 下的目标段名，空串表示直接落 /admin 概览页。
- */
-const LEGACY_ADMIN_SECTIONS: Record<string, string> = {
-  site: 'site',
-  models: 'models',
-  deepseek: 'deepseek',
-  sandbox: 'sandbox',
-  email: 'email',
-  files: 'files',
-  logging: 'logging',
-  'platform-overview': '',
-  'platform-users': 'users',
-  'platform-sessions': 'sessions',
-  'platform-logs': 'logs',
-}
-
-const legacyAdminRoutes = Object.entries(LEGACY_ADMIN_SECTIONS).map(([section, target]) => ({
-  path: `/settings/${section}`,
-  redirect: target ? `/admin/${target}` : '/admin',
-}))
-
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -62,7 +39,6 @@ const router = createRouter({
       component: () => import('@/views/ShareView.vue'),
       meta: { public: true },
     },
-    ...legacyAdminRoutes,
     {
       path: '/settings/:section?',
       name: 'settings',

@@ -256,38 +256,3 @@ def run_item_attachment(payload: dict[str, Any]) -> Any:
     from app.schemas.run import Attachment
 
     return Attachment.model_validate(payload)
-
-
-def test_legacy_media_items_load_into_file_id_model() -> None:
-    """线上旧 item 是 storage_key/alt 字段；新模型必须原地读出，不能等数据迁移。"""
-    key = str(uuid.uuid4())
-    resource = run_item.ResourceItem.model_validate(
-        {
-            "id": str(uuid.uuid4()),
-            "type": "resource",
-            "role": "assistant",
-            "storage_key": key,
-            "name": "a.pdf",
-            "media_type": "application/pdf",
-            "size": 10,
-            "in_context": False,
-            "display": True,
-            "created_at": "2026-01-01T00:00:00Z",
-        }
-    )
-    assert resource.file_id == key
-
-    image = run_item.ImageItem.model_validate(
-        {
-            "id": str(uuid.uuid4()),
-            "type": "image",
-            "role": "assistant",
-            "file_id": key,
-            "media_type": "image/png",
-            "alt": "pic.png",
-            "in_context": False,
-            "display": True,
-            "created_at": "2026-01-01T00:00:00Z",
-        }
-    )
-    assert image.name == "pic.png"

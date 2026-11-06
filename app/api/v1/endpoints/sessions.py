@@ -104,7 +104,7 @@ async def switch_leaf(
 async def list_pending(
     session_id: UUID, db: SessionDep, user: CurrentUserDep
 ) -> list[PendingBatchRead]:
-    """各分支上未决的中断批次；每条带它挂在哪条 run 上。"""
+    """当前分支上未决的中断批次；每条带它挂在哪条 run 上。"""
     await session_service.get_session_or_404(db, session_id, owner_id=user.id)
     batches = await run_store.pending_batches(db, session_id)
     return [

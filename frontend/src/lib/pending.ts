@@ -91,7 +91,7 @@ export function isPreviewTool(name: string): boolean {
   return name === PREVIEW_TOOL
 }
 
-export function isAskTool(name: string): boolean {
+function isAskTool(name: string): boolean {
   return name === ASK_TOOL
 }
 

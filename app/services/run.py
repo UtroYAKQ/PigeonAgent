@@ -15,7 +15,6 @@ from uuid import UUID, uuid4
 from ag_ui.core import RunErrorEvent
 from pydantic_ai import CancellationToken, DeferredToolResults, ModelSettings
 from pydantic_ai.toolsets import AbstractToolset
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
@@ -31,12 +30,11 @@ from app.core.exceptions import (
     UnprocessableError,
 )
 from app.db.session import SessionFactory
-from app.domain.run_items import ResourceItem, RunItem
+from app.domain.run_items import RunItem
 from app.enums import RunStatus
 from app.infra.model_factory import ModelFactory, ResolvedModel
 from app.infra.storage import ObjectStorage, get_storage
 from app.models.llm_model import LlmModel
-from app.models.session import ChatSession
 from app.render.hub import RenderHub
 from app.render.producer import RenderProducer
 from app.sandbox.pool import SandboxPool
@@ -51,7 +49,7 @@ from app.services import billing, chat_log, credit_guard, file_service, run_stor
 from app.services import chat_session as session_service
 from app.services import image_model as image_model_service
 from app.services.run_control import RunControl
-from app.services.run_store import RUN_LEASE_SECONDS, ResumeDecisions
+from app.services.run_store import RUN_LEASE_SECONDS, PendingBatch, ResumeDecisions
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +175,7 @@ async def launch_run(
 ) -> str:
     runtime = settings or get_settings()
     resource_items: list[RunItem] = []
+    resume_batch: PendingBatch | None = None
     if isinstance(payload, RunResume):
         user_input = None
         attachments = []
@@ -224,12 +223,6 @@ async def launch_run(
         payload.enable_image_generation and runtime.feature_image_generation_enabled
     )
     image_model_id = payload.image_model_id if enable_image_generation else None
-    # 明确选了一个不可用的模型时当场拒掉；后台再发现就没法给请求返回 422 了
-    if (
-        image_model_id is not None
-        and await image_model_service.get_active_model(db, image_model_id) is None
-    ):
-        raise UnprocessableError("所选图片模型不可用，请重新选择")
     if not resolved.supports_tools:
         if isinstance(payload, RunResume):
             raise UnprocessableError(
@@ -239,15 +232,24 @@ async def launch_run(
             raise UnprocessableError(
                 f"模型「{record.name}」未开启工具调用支持，无法使用联网搜索或文件工作区"
             )
-        # 浏览器工具声明是每轮固定下发的，非工具模型直接忽略即可
+        # 生图同样依赖工具调用，连图片模型一起忽略；
+        # 能力被关掉就不再校验它的配置，非工具模型不该被图片模型拦成 422
         toolset = None
+        enable_image_generation = False
+        image_model_id = None
+    # 明确选了一个不可用的模型时当场拒掉；后台再发现就没法给请求返回 422 了
+    if (
+        image_model_id is not None
+        and await image_model_service.get_active_model(db, image_model_id) is None
+    ):
+        raise UnprocessableError("所选图片模型不可用，请重新选择")
     if enable_web_search and not runtime.deepseek_api_key:
         raise UnprocessableError("联网搜索未配置：请在配置项里填写 DeepSeek API Key")
     # 积分不足就在开跑前拦下：跑完再告知"你欠费了"是最糟的体验
     await billing.require_credits(db, runtime, owner_id)
 
     if isinstance(payload, RunResume):
-        batch = next(
+        resume_batch = next(
             (
                 item
                 for item in await run_store.pending_batches(db, session_id)
@@ -255,10 +257,10 @@ async def launch_run(
             ),
             None,
         )
-        if batch is None:
+        if resume_batch is None:
             raise ConflictError(f"Interrupt batch {payload.interrupt_id} is not pending")
         # 同一轮续写：沿用声明批次的那条 run，事件流也复用同一个 id
-        run_id = str(batch.run_id)
+        run_id = str(resume_batch.run_id)
     else:
         # 生成 run id；session.active_run_id 由 start_run_turn 在同一事务里占用
         run_id = str(uuid4())
@@ -270,11 +272,12 @@ async def launch_run(
             run_id=run_id,
             user_input=user_input,
             attachments=attachments,
-            resource_items=list(resource_items) if not resume else [],
+            resource_items=resource_items,
             retry_run_id=retry_run_id,
             parent_run_id=parent_run_id,
             parent_was_given=parent_was_given,
             resume=resume,
+            resume_batch=resume_batch,
             model_id=resolved_model_id,
         )
     except Exception:
@@ -289,6 +292,7 @@ async def launch_run(
             session_factory=session_factory,
             session_id=session_id,
             run_id=run_id,
+            owner_id=owner_id,
             deferred_tool_results=deferred_tool_results,
             resolved=resolved,
             model_id=resolved_model_id,
@@ -312,6 +316,7 @@ async def execute_run(
     session_factory: SessionFactory,
     session_id: UUID,
     run_id: str,
+    owner_id: UUID,
     resolved: ResolvedModel,
     model_id: int | None,
     thinking_level: str | None = None,
@@ -337,95 +342,85 @@ async def execute_run(
         _renew_lease_loop(session_factory, session_id, run_id, registry, producer)
     )
     try:
-        async with session_factory() as db:
-            # 不支持工具的模型不需要工作区，避免白白建目录 / 启沙箱
-            workspace = (
-                await _build_workspace(db, session_id, run_id, sandbox_pool, runtime)
-                if resolved.supports_tools
-                else None
-            )
-            logger.info(
-                "Run %s workspace prepared in %.2fs (sandbox=%s)",
-                run_id,
-                time.perf_counter() - started_at,
-                isinstance(workspace, SandboxWorkspace),
-            )
-            # 本地模式没有注入资源时不开文件工具：纯聊天省事，TestModel 之类的
-            # 顺序调用模型也不会被无关工具干扰；沙箱模式始终带着命令执行。
-            run_obj = await run_store.get_run_or_404(db, session_id, run_uuid)
-            offer_tools = resolved.supports_tools and (
-                isinstance(workspace, SandboxWorkspace)
-                or any(isinstance(item, ResourceItem) for item in run_obj.content)
-            )
-            session_owner = await _session_owner(session_factory, session_id)
-            # 有可用的图片模型、平台开着、本次也开着，才把生成工具挂上去
-            image_model = None
-            image_ready = (
+        # 不支持工具的模型不需要工作区，避免白白建目录 / 启沙箱
+        workspace = (
+            await _build_workspace(session_id, run_id, sandbox_pool, runtime)
+            if resolved.supports_tools
+            else None
+        )
+        logger.info(
+            "Run %s workspace prepared in %.2fs (sandbox=%s)",
+            run_id,
+            time.perf_counter() - started_at,
+            isinstance(workspace, SandboxWorkspace),
+        )
+        # 有可用的图片模型、平台开着、本次也开着，才把生成工具挂上去
+        image_model_id = await _resolve_image_model_id(
+            session_factory,
+            image_model_id,
+            enabled=(
                 resolved.supports_tools
                 and enable_image_generation
                 and runtime.feature_image_generation_enabled
-            )
-            if image_ready:
-                image_model = await image_model_service.get_active_model(db, image_model_id)
-                image_ready = image_model is not None
-            bundle = build_tool_bundle(
-                resolved.model,
-                workspace=workspace,
-                session_factory=session_factory,
-                owner_id=session_owner,
-                settings=runtime,
-                run_id=lambda: run_uuid,
-                image_model_id=image_model.id if image_model is not None else None,
-                enable_image_generation=image_ready,
-                enable_web_search=enable_web_search,
-                offer_workspace_tools=offer_tools,
-            )
-            model_settings = _settings_with_thinking(resolved.settings, thinking_level)
+            ),
+        )
+        bundle = build_tool_bundle(
+            resolved.model,
+            workspace=workspace,
+            session_factory=session_factory,
+            owner_id=owner_id,
+            settings=runtime,
+            run_id=run_uuid,
+            image_model_id=image_model_id,
+            enable_image_generation=image_model_id is not None,
+            enable_web_search=enable_web_search,
+            offer_workspace_tools=resolved.supports_tools,
+        )
+        model_settings = _settings_with_thinking(resolved.settings, thinking_level)
 
-            # 用量落库后按水位差结算，余额见底就停掉本轮；策略本体在 credit_guard
-            usage_guard = credit_guard.make_usage_guard(
-                session_factory,
-                runtime,
-                session_id=session_id,
-                run_id=run_uuid,
-                owner_id=session_owner,
-            )
+        # 用量落库后按水位差结算，余额见底就停掉本轮；策略本体在 credit_guard
+        usage_guard = credit_guard.make_usage_guard(
+            session_factory,
+            runtime,
+            session_id=session_id,
+            run_id=run_uuid,
+            owner_id=owner_id,
+        )
 
-            agent = BaseAgent(
-                resolved.model,
-                model_settings=model_settings,
-                db=db,
-                session_id=session_id,
-                model_id=model_id,
-                session_factory=session_factory,
-                run_id=run_id,
-                tools=bundle.tools,
-                prompt=bundle.instructions,
-                context_window=resolved.context_window,
-                compaction_threshold=(
-                    resolved.compaction_threshold
-                    if resolved.compaction_threshold is not None
-                    else runtime.compaction_threshold
-                ),
-                supports_tools=resolved.supports_tools,
-                on_usage=usage_guard,
-            )
-            # 用户消息已经在 start_run_turn 里写入，agent 只从 message_history 读
-            async for event in agent.agui_events(
-                None,
-                run_id=run_id,
-                deferred_tool_results=deferred_tool_results,
-                cancellation_token=cancellation_token,
-                toolsets=([toolset] if toolset is not None and resolved.supports_tools else None),
-            ):
-                if not first_event_logged:
-                    first_event_logged = True
-                    logger.info(
-                        "Run %s first stream event after %.2fs",
-                        run_id,
-                        time.perf_counter() - started_at,
-                    )
-                await producer.publish(event)
+        agent = BaseAgent(
+            resolved.model,
+            model_settings=model_settings,
+            session_id=session_id,
+            model_id=model_id,
+            session_factory=session_factory,
+            run_id=run_id,
+            tools=bundle.tools,
+            prompt=bundle.instructions,
+            context_window=resolved.context_window,
+            compaction_threshold=(
+                resolved.compaction_threshold
+                if resolved.compaction_threshold is not None
+                else runtime.compaction_threshold
+            ),
+            supports_tools=resolved.supports_tools,
+            on_usage=usage_guard,
+        )
+        # 用户消息已经在 start_run_turn 里写入，agent 只从 message_history 读
+        async for event in agent.agui_events(
+            None,
+            run_id=run_id,
+            deferred_tool_results=deferred_tool_results,
+            cancellation_token=cancellation_token,
+            toolsets=([toolset] if toolset is not None and resolved.supports_tools else None),
+        ):
+            if not first_event_logged:
+                first_event_logged = True
+                logger.info(
+                    "Run %s first stream event after %.2fs",
+                    run_id,
+                    time.perf_counter() - started_at,
+                )
+            await producer.publish(event)
     except asyncio.CancelledError:
         # 取消时未回填的 tool call 留在原地，用户可以再 resume 那条分支
         error = "run cancelled"
@@ -498,7 +493,6 @@ async def _settle_and_log(
 
 
 async def _build_workspace(
-    db: AsyncSession,
     session_id: UUID,
     run_id: str,
     pool: SandboxPool | None,
@@ -529,20 +523,18 @@ async def _build_workspace(
     return LocalWorkspace(settings, storage, session_id, run_id)
 
 
-async def _session_owner(session_factory: SessionFactory, session_id: UUID) -> UUID | None:
-    """产物归属跟会话主人走；查不到（会话被并发删了）就按匿名处理。
-
-    读库失败同样按匿名走，但必须留痕：余额熔断依赖这个 owner，静默失败等于免检。
-    """
-    try:
-        async with session_factory() as db:
-            value = await db.scalar(
-                select(ChatSession.owner_id).where(ChatSession.id == session_id)
-            )
-            return value
-    except Exception:
-        logger.exception("Failed to resolve owner of session %s", session_id)
+async def _resolve_image_model_id(
+    session_factory: SessionFactory,
+    image_model_id: int | None,
+    *,
+    enabled: bool,
+) -> int | None:
+    """图片工具开跑前定一次模型：默认模型也在这里落到具体 id。"""
+    if not enabled:
         return None
+    async with session_factory() as db:
+        model = await image_model_service.get_active_model(db, image_model_id)
+        return model.id if model is not None else None
 
 
 def _supported_thinking_level(record: LlmModel, level: str | None) -> str | None:

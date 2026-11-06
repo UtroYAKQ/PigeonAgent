@@ -624,7 +624,7 @@ export interface LiveMedia {
   size: number
   alt: string | null
   /** generated = 出图工具；workspace = 沙箱发布 */
-  origin?: 'generated' | 'workspace'
+  origin: 'generated' | 'workspace'
 }
 
 export interface LiveToolState {

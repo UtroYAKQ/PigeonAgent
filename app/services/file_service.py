@@ -16,7 +16,6 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import Settings
 from app.core.exceptions import (
@@ -25,9 +24,16 @@ from app.core.exceptions import (
     StorageUnavailableError,
     UnprocessableError,
 )
-from app.domain.media_type import detect_media_type
+from app.domain.file_ref import parse_file_id
+from app.domain.media_type import effective_media_type
 from app.domain.run_items import ImageItem, ResourceItem, RunItem, VideoItem
-from app.infra.file_records import is_owner_visible, resolve_resources
+from app.domain.time import ensure_utc
+from app.infra.file_records import (
+    is_owner_visible,
+    owner_filter,
+    resolve_files,
+    resolve_owned_files,
+)
 from app.infra.storage import ObjectStorage, get_storage, safe_name, upload_key
 from app.models.blob import Blob
 from app.models.file_record import FileRecord
@@ -51,7 +57,7 @@ def _read_of(row: FileRecord, blob: Blob | None) -> FileRead:
         id=row.id,
         name=row.name,
         size=blob.size if blob is not None else 0,
-        content_type=row.content_type,
+        content_type=effective_media_type(row.name, row.content_type),
         sha256=row.blob_hash,
     )
 
@@ -68,11 +74,12 @@ async def _blobs_of(db: AsyncSession, hashes: Sequence[str]) -> dict[str, Blob]:
 def _file_for(
     owner: uuid.UUID | None, name: str | None, sha256: str, content_type: str | None
 ) -> FileRecord:
+    safe = safe_name(name)
     return FileRecord(
         owner_id=owner,
-        name=safe_name(name),
+        name=safe,
         blob_hash=sha256,
-        content_type=content_type,
+        content_type=effective_media_type(safe, content_type),
     )
 
 
@@ -109,7 +116,7 @@ async def instant_create(
     blob = await db.get(Blob, payload.sha256)
     owned_reference = await db.scalar(
         select(FileRecord.id).where(
-            _record_owner_visible(owner),
+            owner_filter(owner),
             FileRecord.blob_hash == payload.sha256,
             FileRecord.deleted_at.is_(None),
         )
@@ -161,7 +168,7 @@ async def complete_upload(
 ) -> FileRead:
     """客户端 PUT 完调用：复核内容指纹，搬运到正式 key，建物理块和引用。"""
     session = await _owned_session(db, owner, upload_id)
-    if session.expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
+    if ensure_utc(session.expires_at) < datetime.now(UTC):
         # 会话过期就整条丢弃：对象留着只会变成无人引用的垃圾
         await storage.delete(session.storage_key)
         await db.delete(session)
@@ -206,7 +213,7 @@ async def _finalize(
             await storage.delete(target)
     await storage.delete(session.storage_key)
     await db.delete(session)
-    file = FileRecord(owner_id=owner_id, name=name, blob_hash=sha256, content_type=content_type)
+    file = _file_for(owner_id, name, sha256, content_type)
     db.add(file)
     await _touch_blob(db, sha256)
     await db.commit()
@@ -223,8 +230,7 @@ async def direct_upload(
     body: bytes,
 ) -> FileRead:
     """小文件直传：服务端亲算 hash，先对齐物理层再建逻辑引用。"""
-    if not content_type or content_type == "application/octet-stream":
-        content_type = detect_media_type(name, body)
+    content_type = effective_media_type(name, content_type, body)
     sha256 = _hash_hex(body)
     blob = await db.get(Blob, sha256)
     if blob is None:
@@ -248,7 +254,7 @@ async def list_files(
         await db.scalars(
             select(FileRecord)
             .where(
-                _record_owner_visible(owner),
+                owner_filter(owner),
                 FileRecord.deleted_at.is_(None),
             )
             .order_by(FileRecord.created_at.desc())
@@ -257,10 +263,6 @@ async def list_files(
     )
     blobs = await _blobs_of(db, [row.blob_hash for row in rows])
     return [_read_of(row, blobs.get(row.blob_hash)) for row in rows]
-
-
-def _record_owner_visible(user: uuid.UUID | None) -> ColumnElement[bool]:
-    return FileRecord.owner_id.is_(None) if user is None else FileRecord.owner_id == user
 
 
 async def resource_items_for(
@@ -272,17 +274,15 @@ async def resource_items_for(
     其余文档类才用 <resource/> 标签让模型按需 load_files。
     """
     items: list[RunItem] = []
-    resolved = await resolve_resources(db, [ref.file_id for ref in refs])
+    resolved = await resolve_owned_files(db, [ref.file_id for ref in refs], owner_id=owner)
     blobs = await _blobs_of(db, [record.blob_hash for record in resolved.values()])
     for ref in refs:
-        try:
-            record = resolved.get(uuid.UUID(ref.file_id))
-        except ValueError:
-            record = None
-        if record is None or not is_owner_visible(record.owner_id, owner):
+        parsed = parse_file_id(ref.file_id)
+        record = resolved.get(parsed) if parsed is not None else None
+        if record is None:
             raise UnprocessableError(f"文件 {ref.file_id} 不存在或已被删除")
         blob = blobs.get(record.blob_hash)
-        media_type = record.content_type or "application/octet-stream"
+        media_type = effective_media_type(record.name, record.content_type)
         name = ref.name or record.name
         if media_type.startswith("image/"):
             items.append(
@@ -329,16 +329,14 @@ async def resolve_attachments(
     """
     if not attachments:
         return []
-    resolved = await resolve_resources(db, [item.file_id for item in attachments])
+    resolved = await resolve_owned_files(db, [item.file_id for item in attachments], owner_id=owner)
     normalized: list[Attachment] = []
     for attachment in attachments:
-        try:
-            record = resolved.get(uuid.UUID(attachment.file_id))
-        except ValueError:
-            record = None
-        if record is None or not is_owner_visible(record.owner_id, owner):
+        parsed = parse_file_id(attachment.file_id)
+        record = resolved.get(parsed) if parsed is not None else None
+        if record is None:
             raise UnprocessableError(f"附件 {attachment.file_id} 不存在或已被删除")
-        media_type = record.content_type or attachment.media_type
+        media_type = effective_media_type(record.name, record.content_type)
         if media_type.startswith("image/"):
             kind = "image"
         elif media_type.startswith("video/"):
@@ -380,7 +378,7 @@ async def presigned_for(
     blob = await db.get(Blob, file.blob_hash)
     if blob is None:
         raise GoneError("文件内容已被清理，无法下载")
-    content_type = file.content_type or "application/octet-stream"
+    content_type = effective_media_type(file.name, file.content_type)
     return await storage.url_for(
         blob.storage_key,
         download_name=file.name,
@@ -405,7 +403,12 @@ async def content_of(
     if blob is None:
         raise GoneError("文件内容已被清理，无法下载")
     data = await storage.get(blob.storage_key)
-    return data, file.name, file.content_type or "application/octet-stream", file.blob_hash
+    return (
+        data,
+        file.name,
+        effective_media_type(file.name, file.content_type, data),
+        file.blob_hash,
+    )
 
 
 async def load_media(
@@ -413,7 +416,7 @@ async def load_media(
     file_ids: Sequence[str],
     *,
     storage: ObjectStorage | None = None,
-) -> dict[str, tuple[bytes, str]]:
+) -> dict[str, bytes]:
     """按 file_id 批量取媒体字节：回放时把 ImageItem/VideoItem 还原成模型二进制。
 
     没配存储、记录缺失或内容被清理的 key 直接跳过——回放少一张图好过整轮失败。
@@ -426,18 +429,18 @@ async def load_media(
             storage = get_storage()
         except StorageUnavailableError:
             return {}
-    resolved = await resolve_resources(db, wanted)
+    resolved = await resolve_files(db, wanted)
     records: list[tuple[str, FileRecord]] = []
     for fid in wanted:
-        try:
-            record = resolved.get(uuid.UUID(fid))
-        except ValueError:
+        parsed = parse_file_id(fid)
+        if parsed is None:
             logger.warning("Replay skipped file %s: not a file id", fid)
             continue
+        record = resolved.get(parsed)
         if record is not None:
             records.append((fid, record))
     blobs = await _blobs_of(db, [record.blob_hash for _, record in records])
-    out: dict[str, tuple[bytes, str]] = {}
+    out: dict[str, bytes] = {}
     for fid, record in records:
         blob = blobs.get(record.blob_hash)
         if blob is None:
@@ -449,7 +452,7 @@ async def load_media(
             # 少一张图好过整轮失败，但要能在日志里看出少了哪张、为什么少
             logger.exception("Replay skipped file %s: storage read failed", fid)
             continue
-        out[fid] = (data, record.content_type or "application/octet-stream")
+        out[fid] = data
     return out
 
 

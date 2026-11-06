@@ -86,7 +86,7 @@ const activeProvider = computed(
   () => providers.value.find(item => item.key === form.value.provider) ?? null,
 )
 
-/** 预览最终请求地址：拼接规则要和后端 resolve_endpoint 保持一致 */
+/** 预览最终请求地址：拼接规则要和后端 resolve_base_url + preset.path 保持一致 */
 const endpointPreview = computed(() => {
   const preset = activeProvider.value
   if (!preset) return ''

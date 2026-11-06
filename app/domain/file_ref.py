@@ -1,8 +1,9 @@
 """指向 FileRecord 的引用类型。"""
 
+import uuid
 from typing import Annotated
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 # uuid hex 允许带连字符，所以是 32~64 位；附件、资源、图片/视频 item 共用这一处校验。
 FileIdRef = Annotated[
@@ -13,13 +14,23 @@ FileIdRef = Annotated[
 TOOL_MEDIA_METADATA_KEY = "media"
 
 
+def parse_file_id(value: str | uuid.UUID) -> uuid.UUID | None:
+    """把工具/API 传来的 file_id 转成 UUID；格式不对返回 None，由调用方决定报错方式。"""
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value).strip())
+    except ValueError:
+        return None
+
+
 class FileRef(BaseModel):
     """一个文件引用的唯一形状：file_id 是 FileRecord 主键，其余是展示/校验信息。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    # 老数据里 resource 的字段名是 storage_key；读入时兼容，写出统一 file_id。
-    file_id: FileIdRef = Field(validation_alias=AliasChoices("file_id", "storage_key"))
+    # 唯一字段名；写出和读入都只认 file_id。
+    file_id: FileIdRef
     name: str = "file"
     media_type: str = "application/octet-stream"
     size: int = 0

@@ -114,18 +114,6 @@ def _declared_base(provider: str, base_url: str | None) -> tuple[ImageProviderPr
     return preset, base
 
 
-def resolve_endpoint(provider: str, base_url: str | None) -> str:
-    """把「供应商 + 可能的自定义地址」拼成最终请求地址。
-
-    已经填成完整地址（以 path 结尾）就不再重复拼接，方便直接把文档里的
-    全路径粘进来。
-    """
-    preset, base = _declared_base(provider, base_url)
-    if base.endswith(preset.path):
-        return base
-    return f"{base}{preset.path}"
-
-
 def resolve_base_url(provider: str, base_url: str | None) -> str:
     """给 SDK 用的 base：SDK 自己会拼 `/images/generations`，这里只留前缀。
 

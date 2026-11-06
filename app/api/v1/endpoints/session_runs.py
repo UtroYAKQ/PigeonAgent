@@ -8,6 +8,7 @@ from app.core.exceptions import ConflictError
 from app.db.types import dump_message
 from app.domain.run_items import CustomItem
 from app.schemas.run import (
+    CustomItemCreate,
     SessionContext,
     SessionRunList,
     SessionRunRead,
@@ -45,9 +46,10 @@ async def list_runs(
 async def get_run(
     session_id: UUID, run_id: UUID, db: SessionDep, user: CurrentUserDep
 ) -> SessionRunRead:
-    await session_service.get_session_or_404(db, session_id, owner_id=user.id)
+    chat_session = await session_service.get_session_or_404(db, session_id, owner_id=user.id)
     run = await run_store.get_run_or_404(db, session_id, run_id)
-    return SessionRunRead.model_validate(run)
+    branches = await run_store.branch_navs(db, session_id, [run], chat_session=chat_session)
+    return SessionRunRead.model_validate(run).model_copy(update={"branch": branches.get(run.id)})
 
 
 @router.post(
@@ -58,7 +60,7 @@ async def get_run(
 async def append_custom_item(
     session_id: UUID,
     run_id: UUID,
-    payload: CustomItem,
+    payload: CustomItemCreate,
     db: SessionDep,
     user: CurrentUserDep,
 ) -> SessionRunRead:
@@ -67,15 +69,22 @@ async def append_custom_item(
     if run_store.run_is_live(chat_session):
         raise ConflictError("Cannot append an item while a run is active")
     await run_store.get_run_or_404(db, session_id, run_id)
-    item = payload.model_copy(update={"in_context": False})
+    item = CustomItem(
+        renderer=payload.renderer,
+        version=payload.version,
+        data=payload.data,
+        key=payload.key,
+    )
     run = await run_store.append_items(db, session_id, run_id, [item])
-    return SessionRunRead.model_validate(run)
+    branches = await run_store.branch_navs(db, session_id, [run], chat_session=chat_session)
+    return SessionRunRead.model_validate(run).model_copy(update={"branch": branches.get(run.id)})
 
 
 @router.get("/{session_id}/context", response_model=SessionContext)
 async def get_context(session_id: UUID, db: SessionDep, user: CurrentUserDep) -> SessionContext:
+    """调试用的上下文快照：只拼标签，不下载媒体字节。"""
     await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    result = await run_store.build_context(db, session_id)
+    result = await run_store.build_context(db, session_id, with_media=False)
     return SessionContext(
         runs=[SessionRunRead.model_validate(run) for run in result.runs],
         messages=[dump_message(message) for message in result.messages],

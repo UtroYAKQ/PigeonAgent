@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.time import ensure_utc
 from app.models.chat_request_log import ChatRequestLog
 from app.models.llm_model import LlmModel
 from app.models.session import ChatSession
@@ -45,17 +46,8 @@ async def finish_run_log(
     finished = datetime.now(UTC)
     totals = await billing.run_charge_totals(db, run_id)
     # 以 run 起点算整轮时长；resume 那次 started_at 只是续写段的起点。
-    # SQLite 读回来可能是 naive，按 UTC 解释才能和 finished 相减。
-    created_at = run.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=UTC)
-    duration_ms = max(int((finished - created_at).total_seconds() * 1000), 0)
-    log = await db.scalar(
-        select(ChatRequestLog)
-        .where(ChatRequestLog.run_id == run_id)
-        .order_by(ChatRequestLog.created_at.desc())
-        .limit(1)
-    )
+    duration_ms = max(int((finished - ensure_utc(run.created_at)).total_seconds() * 1000), 0)
+    log = await db.scalar(select(ChatRequestLog).where(ChatRequestLog.run_id == run_id))
     if log is None:
         log = ChatRequestLog(
             user_id=owner_id,

@@ -102,19 +102,6 @@ class FileMediaItem(BaseItem):
     media_type: str = "application/octet-stream"
     size: int = 0
 
-    @model_validator(mode="before")
-    @classmethod
-    def _legacy_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        legacy_key = data.get("storage_key")
-        if "file_id" not in data and isinstance(legacy_key, str):
-            data = {k: v for k, v in data.items() if k != "storage_key"}
-            data["file_id"] = legacy_key
-        if not data.get("name") and data.get("alt"):
-            data = {**data, "name": data["alt"]}
-        return data
-
 
 class ImageItem(FileMediaItem):
     type: Literal[ItemType.IMAGE] = ItemType.IMAGE

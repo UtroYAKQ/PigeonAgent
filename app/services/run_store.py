@@ -32,6 +32,7 @@ from app.domain.run_items import (
     ToolResultItem,
     VideoItem,
 )
+from app.domain.time import ensure_utc
 from app.enums import RunStatus
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
@@ -307,7 +308,11 @@ def _compaction_start(runs: Sequence[SessionRun]) -> tuple[int, int] | None:
 
 
 async def build_context(
-    db: AsyncSession, session_id: UUID, *, leaf_id: UUID | None = None
+    db: AsyncSession,
+    session_id: UUID,
+    *,
+    leaf_id: UUID | None = None,
+    with_media: bool = True,
 ) -> BuiltContext:
     chat_session = await db.get(ChatSession, session_id)
     leaf = (
@@ -345,7 +350,7 @@ async def build_context(
         for item in items:
             if isinstance(item, ToolResultItem) and item.in_context:
                 media_ids.extend(ref.file_id for ref in item.media)
-    media = await file_service.load_media(db, media_ids)
+    media = await file_service.load_media(db, media_ids) if with_media else {}
     for run, items in slices:
         messages.extend(codec.messages_from_items(items, usage=run.usage, media=media))
     messages = codec.repair_dangling_tool_calls(messages, skip_tool_call_ids=skip)
@@ -395,7 +400,9 @@ async def append_items(
     if any(
         isinstance(item, (ApprovalRequestItem, CallRequestItem, ToolResultItem)) for item in items
     ):
-        await _sync_pending_count(db, chat_session, chat_session.active_leaf_run_id)
+        # 中断声明与工具结果都落在同一条 run；写入中的 run 就是当前叶子，
+        # 祖先分支在开轮时已保证 quiet，所以未决计数只需看这一条 run。
+        chat_session.pending_batches = len(_pending_batches_from_path([run]))
     await db.commit()
     await db.refresh(run)
     return run
@@ -490,6 +497,7 @@ async def start_run_turn(
     parent_run_id: UUID | None = None,
     parent_was_given: bool = False,
     resume: ResumeDecisions | None = None,
+    resume_batch: PendingBatch | None = None,
     model_id: int | None = None,
 ) -> SessionRun:
     """占用当前 run；resume 直接续写声明批次的那条 run，不再另开一条。
@@ -506,11 +514,10 @@ async def start_run_turn(
             ),
         )
 
-    chat_session_id = chat_session.id
     run_uuid = UUID(run_id)
 
     if resume is not None:
-        target = await _claim_resume(db, chat_session_id, chat_session, resume)
+        target = await _claim_resume(db, chat_session, resume, resume_batch)
         if target != run_uuid:
             await _abort(
                 db,
@@ -599,21 +606,21 @@ def run_is_live(chat_session: ChatSession, *, now: datetime | None = None) -> bo
     expires_at = chat_session.active_run_expires_at
     if expires_at is None:
         return True
-    # SQLite 的 DateTime(timezone=True) 读回来是 naive，按 UTC 解释才能比
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=UTC)
-    return expires_at > (now or datetime.now(UTC))
+    return ensure_utc(expires_at) > ensure_utc(now or datetime.now(UTC))
 
 
 async def _claim_resume(
     db: AsyncSession,
-    session_id: UUID,
     chat_session: ChatSession,
     resume: ResumeDecisions,
+    batch: PendingBatch | None,
 ) -> UUID:
-    unresolved = await pending_batches(db, session_id)
-    batch = next((item for item in unresolved if item.interrupt_id == resume.interrupt_id), None)
     if batch is None:
+        await _abort(
+            db,
+            ConflictError(f"Interrupt batch {resume.interrupt_id} is not pending"),
+        )
+    if batch.interrupt_id != resume.interrupt_id:
         await _abort(
             db,
             ConflictError(f"Interrupt batch {resume.interrupt_id} is not pending"),

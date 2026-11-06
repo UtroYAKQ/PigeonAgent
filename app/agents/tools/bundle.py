@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -31,7 +30,7 @@ def build_tool_bundle(
     session_factory: async_sessionmaker[AsyncSession],
     owner_id: UUID | None,
     settings: Settings,
-    run_id: Callable[[], UUID | None],
+    run_id: UUID | None,
     image_model_id: int | None,
     enable_image_generation: bool,
     enable_web_search: bool,
@@ -64,12 +63,7 @@ def build_tool_bundle(
             )
         )
 
-    generate_ready = (
-        enable_image_generation
-        and workspace is not None
-        and storage is not None
-        and image_model_id is not None
-    )
+    generate_ready = enable_image_generation and storage is not None and image_model_id is not None
     if generate_ready and storage is not None:
         tools.append(
             Tool(

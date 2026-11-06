@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from app.api.deps import CurrentUserDep, SessionDep, SettingsDep
 from app.core.config import Settings
 from app.core.exceptions import ConfigurationError, ForbiddenError, UnprocessableError
+from app.domain.media_type import effective_media_type
 from app.infra.storage import ObjectStorage, get_storage
 from app.schemas.file import FileLinkOut, FilePrepare, FilePrepareOut, FileRead
 from app.services import file_link, file_service
@@ -141,7 +142,11 @@ async def create_file_link(
     file = await file_service.assert_readable(db, user.id, file_id)
     ttl = settings.file_link_ttl_seconds
     url = await file_service.presigned_for(
-        db, storage, file, inline=_is_inline_safe(file.content_type), ttl_seconds=ttl
+        db,
+        storage,
+        file,
+        inline=_is_inline_safe(effective_media_type(file.name, file.content_type)),
+        ttl_seconds=ttl,
     )
     return FileLinkOut(url=url, expires_at=datetime.now(UTC) + timedelta(seconds=ttl))
 
@@ -163,7 +168,7 @@ async def read_linked_file(
         db,
         storage,
         file,
-        inline=_is_inline_safe(file.content_type),
+        inline=_is_inline_safe(effective_media_type(file.name, file.content_type)),
         ttl_seconds=settings.file_link_ttl_seconds,
     )
     # 重定向本身不缓存：预签名地址过期后重新点旧链接仍能拿到新签名

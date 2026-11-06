@@ -14,9 +14,7 @@ import {
   buildToolSteps,
   liveToolStep,
   mediaKind,
-  planFromSteps,
   toolLabel,
-  type PlanState,
   type ToolState,
   type ToolStep,
 } from './tools'
@@ -87,7 +85,6 @@ export interface TurnView {
   assistantText: string
   segments: TurnSegment[]
   steps: ToolStep[]
-  plan: PlanState | null
   compactions: CompactionItem[]
   error: ErrorItem | null
   liveError: string | null
@@ -111,7 +108,6 @@ function emptyView(): TurnView {
     assistantText: '',
     segments: [],
     steps: [],
-    plan: null,
     compactions: [],
     attachments: [],
     error: null,
@@ -231,7 +227,7 @@ function mediaFromLive(media: LiveMedia): ArtifactMedia {
   return {
     id: media.file_id,
     kind: mediaKind(media.media_type),
-    origin: media.origin === 'workspace' ? 'workspace' : 'generated',
+    origin: media.origin,
     mediaType: media.media_type,
     fileId: media.file_id,
     name: media.name,
@@ -348,7 +344,7 @@ function mergeSources(base: SourceRef[], live: SourceRef[]): SourceRef[] {
   return [...merged.values()]
 }
 
-/** 正文、步骤、计划、来源全部从同一批段落算出来；流式分支和历史分支的收尾一模一样。 */
+/** 正文、步骤、来源全部从同一批段落算出来；流式分支和历史分支的收尾一模一样。 */
 function settleAssistant(view: TurnView, state: SegmentState, steps: ToolStep[]): void {
   const sources = new Map<string, SourceRef>()
   for (const step of steps) {
@@ -357,7 +353,6 @@ function settleAssistant(view: TurnView, state: SegmentState, steps: ToolStep[])
   view.segments = state.segments
   view.assistantText = assistantTextOf(state.segments)
   view.steps = steps
-  view.plan = planFromSteps(steps)
   view.sources = [...sources.values()].slice(0, 6)
 }
 
@@ -584,7 +579,6 @@ export function mergeTurnViews(base: TurnView | null, live: TurnView): TurnView 
     assistantText: assistantTextOf(segments),
     segments,
     steps,
-    plan: planFromSteps(steps),
     compactions: [...base.compactions, ...live.compactions],
     attachments: [...base.attachments, ...live.attachments],
     error: live.error ?? base.error,

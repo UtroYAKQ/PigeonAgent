@@ -120,13 +120,15 @@ def content_to_json(content: Any) -> Any:
         return {"media": "document-url", "url": content.url}
     if isinstance(content, TextContent):
         return content.content
+    if isinstance(content, Mapping):
+        return {str(key): content_to_json(item) for key, item in content.items()}
     if isinstance(content, Sequence):
         return [content_to_json(element) for element in content]
     return to_json_value(content)
 
 
 def content_from_json(value: Any) -> Any:
-    """``content_to_json`` 的逆变换；没有 media 标记的老数据原样返回。"""
+    """``content_to_json`` 的逆变换；普通内容原样返回。"""
     if isinstance(value, list):
         return [content_from_json(element) for element in value]
     if isinstance(value, dict):
@@ -138,6 +140,7 @@ def content_from_json(value: Any) -> Any:
         url_type = _URL_BY_KIND.get(kind) if isinstance(kind, str) else None
         if url_type is not None:
             return url_type(url=value["url"])
+        return {str(key): content_from_json(item) for key, item in value.items()}
     return value
 
 
@@ -149,8 +152,14 @@ def _without_binary(value: Any) -> Any:
         return _DROPPED
     if isinstance(value, list):
         return [kept for item in value if (kept := _without_binary(item)) is not _DROPPED]
-    if isinstance(value, dict) and value.get("media") == "binary":
-        return _DROPPED
+    if isinstance(value, dict):
+        if value.get("media") == "binary":
+            return _DROPPED
+        return {
+            key: kept
+            for key, item in value.items()
+            if (kept := _without_binary(item)) is not _DROPPED
+        }
     return value
 
 
@@ -192,7 +201,7 @@ def token_usage(usage: Any) -> TokenUsage | None:
     return converted if converted.has_values() else None
 
 
-def _user_content(item: RunItem, media: Mapping[str, tuple[bytes, str]] | None = None) -> Any:
+def _user_content(item: RunItem, media: Mapping[str, bytes] | None = None) -> Any:
     if isinstance(item, TextItem):
         return item.text
     if isinstance(item, ResourceItem):
@@ -203,16 +212,16 @@ def _user_content(item: RunItem, media: Mapping[str, tuple[bytes, str]] | None =
         entry = (media or {}).get(item.file_id)
         if entry is None:
             return tag
-        return [tag, BinaryContent(data=entry[0], media_type=item.media_type)]
+        return [tag, BinaryContent(data=entry, media_type=item.media_type)]
     return None
 
 
 def _tool_return_part(
-    item: ToolResultItem, media: Mapping[str, tuple[bytes, str]] | None = None
+    item: ToolResultItem, media: Mapping[str, bytes] | None = None
 ) -> ToolReturnPart | RetryPromptPart:
     content = content_from_json(item.content)
     payloads = [
-        BinaryContent(data=entry[0], media_type=ref.media_type)
+        BinaryContent(data=entry, media_type=ref.media_type)
         for ref in item.media
         if (entry := (media or {}).get(ref.file_id)) is not None
     ]
@@ -407,7 +416,7 @@ class _MessageBuilder:
     def __init__(
         self,
         usage: TokenUsage | None,
-        media: Mapping[str, tuple[bytes, str]] | None = None,
+        media: Mapping[str, bytes] | None = None,
     ) -> None:
         self.messages: list[ModelMessage] = []
         self.usage = usage
@@ -531,7 +540,7 @@ def messages_from_items(
     items: Sequence[RunItem],
     *,
     usage: TokenUsage | None = None,
-    media: Mapping[str, tuple[bytes, str]] | None = None,
+    media: Mapping[str, bytes] | None = None,
 ) -> list[ModelMessage]:
     builder = _MessageBuilder(usage, media)
     for item in items:

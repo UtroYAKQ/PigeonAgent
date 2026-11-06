@@ -79,6 +79,7 @@ async def test_resume_rejects_unknown_call(db_session: AsyncSession) -> None:
     run, interrupts = await declare_pending(db_session, session_id, [approval_call()])
     run_id = run.id
     batch_id = interrupts[0].interrupt_id
+    batch = (await pending(db_session, session_id))[0]
 
     with pytest.raises(UnprocessableError, match="is not pending"):
         await run_service.start_run_turn(
@@ -88,6 +89,7 @@ async def test_resume_rejects_unknown_call(db_session: AsyncSession) -> None:
             resume=run_service.ResumeDecisions(
                 interrupt_id=batch_id, approvals={"call-missing": True}
             ),
+            resume_batch=batch,
         )
     assert db_session.in_transaction() is False
     reloaded = await run_service.get_run_or_404(db_session, session_id, run_id)
@@ -115,6 +117,7 @@ async def test_resume_must_cover_every_interrupt_in_the_batch(
 ) -> None:
     session_id = await make_session(db_session)
     _, interrupts = await declare_pending(db_session, session_id, [approval_call(), price_call()])
+    batch = (await pending(db_session, session_id))[0]
 
     with pytest.raises(UnprocessableError, match="must cover"):
         await run_service.start_run_turn(
@@ -124,6 +127,7 @@ async def test_resume_must_cover_every_interrupt_in_the_batch(
             resume=run_service.ResumeDecisions(
                 interrupt_id=interrupts[0].interrupt_id, approvals={"call_1": True}
             ),
+            resume_batch=batch,
         )
     assert db_session.in_transaction() is False
 
@@ -142,11 +146,14 @@ async def test_resume_claims_the_branch_and_resolves_after_the_run(
     sibling_id = sibling.id
     await run_service.switch_leaf(db_session, session_id, sibling.id)
 
+    batches = await pending(db_session, session_id)
+    batch = next(item for item in batches if item.interrupt_id == batch_id)
     resumed = await run_service.start_run_turn(
         db_session,
         session_id,
         run_id=str(declaring_id),
         resume=run_service.ResumeDecisions(interrupt_id=batch_id, approvals={"call_1": True}),
+        resume_batch=batch,
     )
 
     # 同一轮续写：不新增 run，只在原来的 run 上继续；批次仍未决，崩了可以原地重试

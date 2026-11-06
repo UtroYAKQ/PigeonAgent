@@ -61,7 +61,7 @@ class ChatSession(TimestampMixin, Base):
     # 当前分支的叶子 run；上下文、分页和重新生成都从它往根走。
     # 故意不建外键：sessions ↔ session_runs 互相引用会让 SQLite 无法建/删表。
     active_leaf_run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, default=None)
-    # 当前分支未决中断批次数；写 request/tool_result 与切分支时增量维护，
+    # 当前分支未决中断批次数；写 request/tool_result 与切分支时沿路径重算，
     # 会话列表不再为了它扫描整棵 run 树。
     pending_batches: Mapped[int] = mapped_column(
         Integer, default=0, server_default=text("0"), nullable=False

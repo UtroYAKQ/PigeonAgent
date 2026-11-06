@@ -18,7 +18,7 @@ export interface StreamOptions {
 }
 
 /** 解析 SSE 数据帧：没有 type 字段的帧不是事件，静默跳过。 */
-export function parseAgUiEvent(raw: unknown): AgUiEvent | null {
+function parseAgUiEvent(raw: unknown): AgUiEvent | null {
   if (typeof raw !== 'object' || raw === null) return null
   const record = raw as Record<string, unknown>
   if (typeof record.type !== 'string' || !record.type) return null

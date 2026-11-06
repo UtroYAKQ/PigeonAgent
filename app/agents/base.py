@@ -67,7 +67,7 @@ class BaseAgent:
                 run_id=run_id,
                 on_usage=on_usage,
             )
-            if db is not None and session_id is not None
+            if session_id is not None and (db is not None or session_factory is not None)
             else None
         )
         self._context_window = context_window

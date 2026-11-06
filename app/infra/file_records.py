@@ -1,4 +1,4 @@
-"""文件记录的低层查询：storage_key 到 FileRecord 的解析。"""
+"""文件记录的低层查询：file_id 到 FileRecord 的解析。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
+from app.domain.file_ref import parse_file_id
 from app.models.file_record import FileRecord
 
 
@@ -16,24 +18,28 @@ def is_owner_visible(owner_id: uuid.UUID | None, viewer: uuid.UUID | None) -> bo
     return owner_id == viewer
 
 
-def _wanted_ids(keys: Sequence[uuid.UUID | str]) -> list[uuid.UUID]:
+def owner_filter(owner_id: uuid.UUID | None) -> ColumnElement[bool]:
+    """归属谓词的 SQL 形状；owner_id 为 None 时只匹配孤儿记录。"""
+    return FileRecord.owner_id.is_(None) if owner_id is None else FileRecord.owner_id == owner_id
+
+
+def _wanted_ids(file_ids: Sequence[uuid.UUID | str]) -> list[uuid.UUID]:
     wanted: list[uuid.UUID] = []
-    for key in keys:
-        try:
-            wanted.append(key if isinstance(key, uuid.UUID) else uuid.UUID(str(key)))
-        except ValueError:
-            continue
+    for file_id in file_ids:
+        parsed = parse_file_id(file_id)
+        if parsed is not None:
+            wanted.append(parsed)
     return wanted
 
 
-async def resolve_resources(
-    db: AsyncSession, keys: Sequence[uuid.UUID | str]
+async def resolve_files(
+    db: AsyncSession, file_ids: Sequence[uuid.UUID | str]
 ) -> dict[uuid.UUID, FileRecord]:
-    """storage_key（=FileRecord.id）批量解析成 FileRecord；坏 key 静默跳过。
+    """file_id 批量解析成 FileRecord；坏 id 静默跳过。
 
-    `load_files` 工具会原样转述哪些 key 没找到，所以这里不需要抛错。
+    `load_files` 工具会原样转述哪些 id 没找到，所以这里不需要抛错。
     """
-    wanted = _wanted_ids(keys)
+    wanted = _wanted_ids(file_ids)
     if not wanted:
         return {}
     rows = await db.scalars(
@@ -42,24 +48,21 @@ async def resolve_resources(
     return {row.id: row for row in rows}
 
 
-async def resolve_owned_resources(
-    db: AsyncSession, keys: Sequence[uuid.UUID | str], *, owner_id: uuid.UUID | None
+async def resolve_owned_files(
+    db: AsyncSession, file_ids: Sequence[uuid.UUID | str], *, owner_id: uuid.UUID | None
 ) -> dict[uuid.UUID, FileRecord]:
-    """同 ``resolve_resources``，但把归属过滤也收在这一层。
+    """同 ``resolve_files``，但把归属过滤也收在这一层。
 
-    owner_id 为 None 时只匹配孤儿记录；调用方不再自己复制 owner 判断。
+    调用方不再自己复制 owner 判断。
     """
-    wanted = _wanted_ids(keys)
+    wanted = _wanted_ids(file_ids)
     if not wanted:
         return {}
-    owner_filter = (
-        FileRecord.owner_id.is_(None) if owner_id is None else FileRecord.owner_id == owner_id
-    )
     rows = await db.scalars(
         select(FileRecord).where(
             FileRecord.id.in_(wanted),
             FileRecord.deleted_at.is_(None),
-            owner_filter,
+            owner_filter(owner_id),
         )
     )
     return {row.id: row for row in rows}

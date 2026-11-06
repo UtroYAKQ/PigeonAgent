@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.agents.events import ImageGeneratedEvent
+from app.agents.events import ArtifactMedia, ImageGeneratedEvent
 from app.agents.tools import image as image_tool
 from app.agents.turn import AgentTurn
 from app.domain.run_items import ImageItem, RunItem
@@ -34,11 +34,14 @@ async def test_turn_persists_image_event() -> None:
 
     await turn._handle_record_event(
         ImageGeneratedEvent(
-            file_id=file_id,
-            file_name="generated-1.png",
-            media_type="image/png",
-            size=128,
-            alt="雪山日出",
+            media=ArtifactMedia(
+                file_id=file_id,
+                name="generated-1.png",
+                media_type="image/png",
+                size=128,
+                alt="雪山日出",
+                origin="generated",
+            )
         )
     )
 
@@ -125,7 +128,7 @@ async def test_generate_image_tool_returns_keys_and_emits_events(
         _empty_session,  # type: ignore[arg-type]
         owner_id=owner,
         settings=SimpleNamespace(),
-        run_id=lambda: run_id,
+        run_id=run_id,
         image_model_id=1,
     )
     ctx = _RecordingContext()
@@ -147,7 +150,8 @@ async def test_generate_image_tool_returns_keys_and_emits_events(
 
     assert len(ctx.events) == 2
     assert all(isinstance(event, ImageGeneratedEvent) for event in ctx.events)
-    assert [event.file_id for event in ctx.events] == [
+    assert [event.media.file_id for event in ctx.events] == [
         entry["file_id"] for entry in result["images"]
     ]
+    assert all(event.media.origin == "generated" for event in ctx.events)
     assert charged == [(owner, 2, run_id)]

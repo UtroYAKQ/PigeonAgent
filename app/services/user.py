@@ -26,6 +26,8 @@ from app.core.exceptions import (
     UnauthenticatedError,
     UnprocessableError,
 )
+from app.domain.media_type import effective_media_type
+from app.domain.time import ensure_utc
 from app.infra import mailer
 from app.models.file_record import FileRecord
 from app.models.user import User
@@ -133,10 +135,7 @@ async def _seconds_since_last_code(db: AsyncSession, email: str, purpose: str) -
     ).first()
     if created_at is None:
         return None
-    if created_at.tzinfo is None:
-        # SQLite 的 DateTime(timezone=True) 读回来不带 tz
-        created_at = created_at.replace(tzinfo=UTC)
-    return (datetime.now(UTC) - created_at).total_seconds()
+    return (datetime.now(UTC) - ensure_utc(created_at)).total_seconds()
 
 
 async def _send_code(db: AsyncSession, settings: Settings, email: str, purpose: str) -> None:
@@ -225,10 +224,7 @@ async def verify_email(db: AsyncSession, settings: Settings, email: str, code: s
     ).first()
     if row is None or row.attempts >= CODE_MAX_ATTEMPTS:
         raise UnprocessableError("验证码已失效，请重新发送")
-    expires_at = row.expires_at
-    if expires_at.tzinfo is None:
-        # SQLite 的 DateTime(timezone=True) 读回来不带 tz
-        expires_at = expires_at.replace(tzinfo=UTC)
+    expires_at = ensure_utc(row.expires_at)
     if expires_at < datetime.now(UTC):
         row.consumed_at = datetime.now(UTC)
         await db.commit()
@@ -323,7 +319,7 @@ async def update_profile(db: AsyncSession, user: User, data: dict[str, Any]) -> 
             record = await db.get(FileRecord, avatar_id)
             if record is None or record.deleted_at is not None or record.owner_id != user.id:
                 raise UnprocessableError("头像文件不存在或不属于当前用户")
-            if not (record.content_type or "").startswith("image/"):
+            if not effective_media_type(record.name, record.content_type).startswith("image/"):
                 raise UnprocessableError("头像必须是图片文件")
             user.avatar_file_id = record.id
     await db.commit()

@@ -23,7 +23,8 @@ class ChatRequestLog(Base):
     __table_args__ = (
         Index("ix_chat_request_logs_user_created", "user_id", "created_at"),
         Index("ix_chat_request_logs_session_created", "session_id", "created_at"),
-        Index("ix_chat_request_logs_run_id", "run_id"),
+        # 一个 run 一条日志：中断续写只更新同一条
+        Index("ix_chat_request_logs_run_id", "run_id", unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -33,7 +34,7 @@ class ChatRequestLog(Base):
         ForeignKey("sessions.id", ondelete="SET NULL")
     )
     run_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
-    # completed | interrupted | failed | cancelled | running
+    # completed | interrupted | failed | cancelled | running | unknown
     status: Mapped[str] = mapped_column(
         String(16), default="running", server_default=text("'running'")
     )

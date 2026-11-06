@@ -97,7 +97,6 @@ async function retry(): Promise<void> {
       <ThinkingChain
         v-if="segment.kind === 'chain'"
         :chain="segment.entries"
-        :plan="index === lastChainIndex ? view.plan : null"
         :is-streaming="isStreaming && segment.streaming"
         :status="isStreaming && !segment.streaming ? 'completed' : view.status"
         :started-at="chainCount === 1 && index === lastChainIndex ? run.created_at : null"

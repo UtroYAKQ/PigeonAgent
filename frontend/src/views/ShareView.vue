@@ -162,11 +162,10 @@ onBeforeUnmount(clearRobots)
             </div>
 
             <div class="min-w-0">
-              <template v-for="(segment, index) in turn.view.segments" :key="segment.id">
+              <template v-for="segment in turn.view.segments" :key="segment.id">
                 <ThinkingChain
                   v-if="segment.kind === 'chain'"
                   :chain="segment.entries"
-                  :plan="index === turn.view.segments.length - 1 ? turn.view.plan : null"
                   :is-streaming="false"
                   :status="turn.view.status"
                   :default-open="ui.autoExpandThinking"

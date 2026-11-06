@@ -48,7 +48,7 @@ async def _seed(
     return await file_service.direct_upload(db, _settings(), storage, owner, name, mime, data)
 
 
-async def test_read_image_by_storage_key_returns_reference_and_bytes(
+async def test_read_image_by_file_id_returns_reference_and_bytes(
     db_session: AsyncSession, db_session_factory: Any
 ) -> None:
     storage = FakeStorage()
@@ -72,6 +72,26 @@ async def test_read_image_by_storage_key_returns_reference_and_bytes(
     assert isinstance(image, BinaryContent)
     assert image.data == PNG and image.media_type == "image/png"
     assert [ref["file_id"] for ref in result.metadata[TOOL_MEDIA_METADATA_KEY]] == [str(record.id)]
+
+
+async def test_read_image_trusts_record_media_type_over_filename(
+    db_session: AsyncSession, db_session_factory: Any
+) -> None:
+    storage = FakeStorage()
+    record = await _seed(db_session, storage, name="chart.jpg", mime="image/png")
+    tool = make_read_image(
+        db_session_factory,
+        owner_id=None,
+        settings=_settings(),
+        storage=storage,
+        workspace=None,
+    )
+
+    result = await tool(str(record.id))
+
+    reference, image = result.return_value
+    assert reference["media_type"] == "image/png"
+    assert image.media_type == "image/png"
 
 
 async def test_read_image_rejects_non_image_and_foreign_file(
@@ -171,7 +191,7 @@ def test_stripped_tool_media_round_trips_by_media_field() -> None:
     assert isinstance(without_media, ToolReturnPart)
     assert without_media.content == item.content
 
-    rebuilt = codec.messages_from_items([item], media={file_id: (PNG, "image/png")})[0].parts[0]
+    rebuilt = codec.messages_from_items([item], media={file_id: PNG})[0].parts[0]
     assert isinstance(rebuilt, ToolReturnPart)
     assert isinstance(rebuilt.content, list)
     assert isinstance(rebuilt.content[-1], BinaryContent)

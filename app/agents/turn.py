@@ -336,15 +336,16 @@ class AgentTurn:
 
     async def _on_image_generated(self, event: ImageGeneratedEvent) -> None:
         """出图工具只发事件；ImageItem 的落库仍统一由 turn 负责。"""
+        media = event.media
         await self._store.append_items(
             [
                 ImageItem(
                     role="assistant",
-                    file_id=event.file_id,
-                    name=event.file_name,
-                    media_type=event.media_type,
-                    size=event.size,
-                    alt=event.alt,
+                    file_id=media.file_id,
+                    name=media.name,
+                    media_type=media.media_type,
+                    size=media.size,
+                    alt=media.alt,
                     in_context=False,
                 )
             ]

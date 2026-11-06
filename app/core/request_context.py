@@ -37,10 +37,6 @@ def current_operation_context() -> RequestOperationContext | None:
     return _operation_context.get()
 
 
-def _header(headers: MutableHeaders, name: str) -> str | None:
-    return headers.get(name)
-
-
 def _is_json(headers: MutableHeaders) -> bool:
     content_type = (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     return content_type in _JSON_TYPES or content_type.endswith("+json")

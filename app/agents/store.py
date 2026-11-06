@@ -12,9 +12,9 @@ from pydantic_ai.messages import ModelMessage
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app import codec
-from app.core.exceptions import CreditsExhausted
+from app.core.exceptions import ConfigurationError, CreditsExhausted
 from app.domain.run_items import CompactionItem, RunItem, TokenUsage
-from app.enums import RunStatus
+from app.enums import ItemType, RunStatus
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
 from app.services import run_store
@@ -29,7 +29,7 @@ UsageObserver = Callable[[TokenUsage], Awaitable[None]]
 class SessionStore:
     def __init__(
         self,
-        db: AsyncSession,
+        db: AsyncSession | None,
         session_id: UUID,
         model_id: int | None = None,
         *,
@@ -40,7 +40,7 @@ class SessionStore:
         self._fallback_db = db
         # 每次写入都单开一条数据库连接，避免和 agent 运行/外层请求共用同一事务；
         # 直接测试没有传 factory 时从 bind 派生一个。
-        if session_factory is None:
+        if session_factory is None and db is not None:
             bind = db.bind
             if isinstance(bind, AsyncEngine):
                 session_factory = async_sessionmaker(bind, expire_on_commit=False)
@@ -72,6 +72,8 @@ class SessionStore:
     async def db(self) -> AsyncIterator[AsyncSession]:
         """每次写入都单开一条数据库连接，避免和 agent 运行/外层请求共用同一事务。"""
         if self.session_factory is None:
+            if self._fallback_db is None:
+                raise ConfigurationError("SessionStore needs a db or session_factory")
             yield self._fallback_db
             return
         async with self.session_factory() as fresh_db:
@@ -121,7 +123,13 @@ class SessionStore:
             )
         # 中断请求、工具结果和错误是状态边界，不能攒到下一批
         boundary = any(
-            item.type in {"approval_request", "call_request", "tool_result", "error"}
+            item.type
+            in {
+                ItemType.APPROVAL_REQUEST,
+                ItemType.CALL_REQUEST,
+                ItemType.TOOL_RESULT,
+                ItemType.ERROR,
+            }
             for item in items
         )
         if boundary or len(self._buffer_items) >= 16 or (usage is not None and usage.has_values()):

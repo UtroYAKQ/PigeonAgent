@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic_ai import DeferredToolRequests
 from pydantic_ai.messages import CustomEvent
@@ -60,28 +60,26 @@ class CompactionResultEvent(CustomEvent):
         }
 
 
-@dataclass(kw_only=True)
-class ImageGeneratedEvent(CustomEvent):
-    """出图工具每上传完一张发一次；turn 落 ImageItem，前端直接渲染。"""
-
-    file_id: str
-    # CustomEvent 的 name 被事件注册名占用，事件里只能叫 file_name
-    file_name: str
-    media_type: str
-    size: int = 0
-    alt: str | None = None
-
-
 @dataclass(frozen=True, slots=True)
 class ArtifactMedia:
-    """一条产物引用；事件和落库共用同一份 typed 载荷。"""
+    """一条产物引用；出图与工作区产物共用同一份 typed 载荷。"""
 
     file_id: str
     name: str
     media_type: str
     size: int = 0
     alt: str | None = None
-    origin: str = "workspace"
+    origin: Literal["workspace", "generated"] = "workspace"
+
+
+@dataclass(kw_only=True)
+class ImageGeneratedEvent(CustomEvent):
+    """出图工具每上传完一张发一次；turn 落 ImageItem，前端直接渲染。"""
+
+    media: ArtifactMedia
+
+    def to_payload(self) -> Any:
+        return {"media": asdict(self.media)}
 
 
 @dataclass(kw_only=True)

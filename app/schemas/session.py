@@ -51,7 +51,7 @@ class SessionRead(BaseModel):
     active_run_expires_at: datetime | None = None
     # 当前分支的叶子 run；上下文、分页和重新生成都从它往根走。
     active_leaf_run_id: UUID | None = None
-    # 当前分支还有几个没解决的中断批次（列表用一次查询算出来）
+    # 当前分支还有几个没解决的中断批次（会话列表直接读这一列）
     pending_batches: int = 0
     usage: TokenUsage = Field(default_factory=TokenUsage)
     last_run_at: datetime

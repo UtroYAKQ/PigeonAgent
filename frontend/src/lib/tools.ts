@@ -3,19 +3,6 @@ import type { BundledLanguage, SpecialLanguage } from 'shiki'
 import type { LiveToolState, RunItem, ToolOutcome, ToolResultItem } from '@/types/api'
 import { parseJsonLike, truncate } from './format'
 
-export interface PlanEntry {
-  index: number
-  content: string
-  status: 'pending' | 'active' | 'done'
-}
-
-export interface PlanState {
-  items: PlanEntry[]
-  done: number
-  total: number
-  progress: string
-}
-
 export type ToolState = 'running' | 'waiting' | 'success' | 'failed' | 'interrupted'
 
 export interface ToolStep {
@@ -31,8 +18,6 @@ export interface ToolStep {
 }
 
 const TOOL_ICONS: Record<string, string> = {
-  plan_set: 'list',
-  plan_show: 'list',
   get_current_time: 'clock',
   run_command: 'terminal',
   load_files: 'files',
@@ -40,7 +25,6 @@ const TOOL_ICONS: Record<string, string> = {
   read_file: 'file',
   write_file: 'edit',
   publish_file: 'upload',
-  make_chart: 'image',
   generate_image: 'image',
   read_image: 'image',
   web_search: 'search',
@@ -60,17 +44,9 @@ function toolIcon(name: string): string {
 
 /** 工具的人类可读名；兜底文案用它，没登记就退化成原名去下划线。 */
 const TOOL_NAMES: Record<string, string> = {
-  delete_file: '删除文件',
-  write_config: '写入配置',
   write_file: '写入文件',
   read_file: '读取文件',
-  archive_log: '归档日志',
-  fetch_price_a: '查询价格',
-  fetch_price_b: '查询价格',
-  fetch_weather: '查询天气',
-  lookup_order: '查询订单',
   ui_open_html_preview: '准备页面预览',
-  make_chart: '生成图表',
   generate_image: '生成图片',
   read_image: '读取图片',
 }
@@ -86,23 +62,13 @@ interface ToolCopy {
   paused?: string
 }
 
-const PLAN_COPY: ToolCopy = {
-  running: '正在规划执行步骤',
-  done: '已规划执行步骤',
-  failed: '计划更新失败',
-  paused: '计划已暂停',
-}
-
 const TOOL_COPY: Record<string, ToolCopy> = {
-  plan_set: PLAN_COPY,
-  plan_show: PLAN_COPY,
   run_command: {
     running: '正在运行代码',
     done: '代码运行完成',
     failed: '代码运行失败',
     paused: '代码运行已暂停',
   },
-  make_chart: { running: '正在生成图表', done: '图表已生成', paused: '图表生成已暂停' },
   generate_image: { running: '正在生成图片', done: '图片已生成', paused: '图片生成已停止' },
   read_image: { running: '正在读取图片', done: '图片已读取', failed: '图片读取失败' },
   web_search: { running: '正在搜索网页', done: '搜索完成', failed: '搜索失败', paused: '搜索已暂停' },
@@ -154,9 +120,6 @@ function toolDetail(name: string, args: unknown): string | null {
   const data = value as Record<string, unknown>
   if (name === 'run_command') {
     return typeof data.command === 'string' ? truncate(data.command, 90) : null
-  }
-  if (name === 'plan_set' || name === 'plan_show') {
-    return Array.isArray(data.items) ? `${data.items.length} 个步骤` : null
   }
   if (name === 'load_files') {
     return Array.isArray(data.storage_keys) ? `加载 ${data.storage_keys.length} 个文件` : null
@@ -228,28 +191,6 @@ export function liveToolStep(tool: LiveToolState): ToolStep {
   }
 }
 
-export function planFromSteps(steps: ToolStep[]): PlanState | null {
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    const step = steps[index]
-    if (!step?.result || (step.name !== 'plan_set' && step.name !== 'plan_show')) continue
-    const parsed = parseJsonLike(step.result)
-    if (!parsed || typeof parsed !== 'object') continue
-    const data = parsed as Record<string, unknown>
-    if (!Array.isArray(data.items)) continue
-    const items = data.items
-      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-      .map((item, position) => ({
-        index: typeof item.index === 'number' ? item.index : position + 1,
-        content: typeof item.content === 'string' ? item.content : '未命名步骤',
-        status: item.status === 'done' || item.status === 'active' ? item.status : 'pending',
-      })) as PlanEntry[]
-    if (!items.length) continue
-    const done = items.filter(item => item.status === 'done').length
-    return { items, done, total: items.length, progress: `${done}/${items.length}` }
-  }
-  return null
-}
-
 export interface TerminalOutput {
   stdout: string
   stderr: string
@@ -304,11 +245,7 @@ export function findMedia(value: unknown, bucket: MediaPayload[] = [], seen = ne
   if (typeof value !== 'object') return bucket
 
   const data = value as Record<string, unknown>
-  const mediaType = typeof data.media_type === 'string'
-    ? data.media_type
-    : typeof data.mime_type === 'string'
-      ? data.mime_type
-      : null
+  const mediaType = typeof data.media_type === 'string' ? data.media_type : null
 
   if (data.media === 'binary' && typeof data.data === 'string' && mediaType) {
     const key = `binary:${mediaType}:${data.data.slice(0, 48)}`
@@ -334,11 +271,7 @@ export function findMedia(value: unknown, bucket: MediaPayload[] = [], seen = ne
     return bucket
   }
 
-  const fileId = typeof data.file_id === 'string'
-    ? data.file_id
-    : typeof data.storage_key === 'string'
-      ? data.storage_key
-      : null
+  const fileId = typeof data.file_id === 'string' ? data.file_id : null
   if (fileId && typeof data.name === 'string' && mediaType && fileId.length >= 32) {
     const key = `resource:${fileId}`
     if (!seen.has(key)) {
