@@ -66,8 +66,8 @@ class FakeStorage:
     ) -> str:
         return f"https://s3.test/{key}?name={download_name}&inline={inline}"
 
-    async def presign_put(self, key: str) -> str:
-        return f"https://s3.test/{key}?put"
+    async def presign_put(self, key: str, *, content_length: int) -> str:
+        return f"https://s3.test/{key}?put&content_length={content_length}"
 
 
 def storage_override(fake: FakeStorage) -> None:
@@ -174,6 +174,28 @@ async def test_instant_upload_uses_no_transfer(
     assert fake.objects == {}, "0 字节传输：桶里不再落新对象"
 
 
+async def test_instant_upload_does_not_reuse_another_owners_hash(
+    client: AsyncClient,
+) -> None:
+    fake = FakeStorage()
+    storage_override(fake)
+    owner = await _register(client, "hash-owner@example.com")
+    stranger = await _register(client, "hash-stranger@example.com")
+    seed = await client.post(
+        "/api/v1/files", headers=bearer(owner), files={"file": ("secret.txt", BODY, None)}
+    )
+
+    prepare = await client.post(
+        "/api/v1/files/prepare",
+        headers=bearer(stranger),
+        json={"name": "guessed.txt", "size": len(BODY), "sha256": seed.json()["sha256"]},
+    )
+
+    assert prepare.status_code == 201
+    assert prepare.json()["deduplicated"] is False
+    assert prepare.json()["upload_id"] is not None
+
+
 async def test_presign_flow_completes_with_verification(client: AsyncClient) -> None:
     fake = FakeStorage()
     storage_override(fake)
@@ -188,6 +210,7 @@ async def test_presign_flow_completes_with_verification(client: AsyncClient) -> 
     out = prepare.json()
     assert out["deduplicated"] is False
     assert out["upload_url"].startswith("https://s3.test/")
+    assert f"content_length={len(BODY)}" in out["upload_url"]
     upload_id = out["upload_id"]
 
     temp_key = key_of_temp(out["upload_url"])
@@ -312,6 +335,35 @@ async def test_content_endpoint_forces_download_for_active_content(
     assert response.headers["content-disposition"].startswith("attachment;")
     assert response.headers["x-content-type-options"] == "nosniff"
     assert "sandbox" in response.headers["content-security-policy"]
+
+
+async def test_svg_is_never_served_inline(client: AsyncClient) -> None:
+    fake = FakeStorage()
+    storage_override(fake)
+    token = await _register(client, "svg@example.com")
+    headers = bearer(token)
+    file_id = (
+        await client.post(
+            "/api/v1/files",
+            headers=headers,
+            files={"file": ("active.svg", b"<svg onload='alert(1)'/>", "image/svg+xml")},
+        )
+    ).json()["id"]
+
+    content = await client.get(f"/api/v1/files/{file_id}/content", headers=headers)
+    assert content.headers["content-type"] == "application/octet-stream"
+    assert content.headers["content-disposition"].startswith("attachment;")
+
+    link = await client.get(f"/api/v1/files/{file_id}/link", headers=headers)
+    assert link.status_code == 200
+    assert "inline=False" in link.json()["url"]
+
+
+async def test_file_list_limit_is_validated(client: AsyncClient) -> None:
+    token = await _register(client, "file-limit@example.com")
+    headers = bearer(token)
+    assert (await client.get("/api/v1/files?limit=0", headers=headers)).status_code == 422
+    assert (await client.get("/api/v1/files?limit=201", headers=headers)).status_code == 422
 
 
 async def test_delete_is_soft_and_blob_survives_other_refs(

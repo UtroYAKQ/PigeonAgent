@@ -104,9 +104,16 @@ async def instant_create(
     owner: uuid.UUID | None,
     payload: FilePrepare,
 ) -> FilePrepareOut:
-    """hash 命中秒传：0 字节传输，直接建逻辑引用；未命中走 presign 上传。"""
+    """本人已有同内容文件时秒传；否则必须上传并由服务端复核内容。"""
     blob = await db.get(Blob, payload.sha256)
-    if blob is not None:
+    owned_reference = await db.scalar(
+        select(FileRecord.id).where(
+            _record_owner_visible(owner),
+            FileRecord.blob_hash == payload.sha256,
+            FileRecord.deleted_at.is_(None),
+        )
+    )
+    if blob is not None and owned_reference is not None:
         file = _file_for(owner, payload.name, payload.sha256, payload.content_type)
         db.add(file)
         await _touch_blob(db, payload.sha256)
@@ -137,7 +144,9 @@ async def _presign_upload(
     return FilePrepareOut(
         deduplicated=False,
         upload_id=session.id,
-        upload_url=await storage.presign_put(session.storage_key),
+        upload_url=await storage.presign_put(
+            session.storage_key, content_length=session.declared_size
+        ),
         expires_in=settings.s3_presign_ttl_seconds,
     )
 
