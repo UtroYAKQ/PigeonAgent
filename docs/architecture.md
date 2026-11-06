@@ -50,7 +50,7 @@ FastAPI（app/）
 
 - 所有业务接口要求 Bearer token；改密或管理员重置密码会让 `token_version` 递增，旧 token 立即失效。
 - 文件按上传者隔离；HTML 等主动内容以内联下载 + `nosniff` + CSP sandbox 返回。
-- 媒体直链由服务端校验归属后签名，浏览器直接从对象存储取字节；`S3_PUBLIC_ENDPOINT_URL` 必须同时是浏览器和沙箱可达地址（沙箱加载大文件时自己 curl 签名 URL）。
+- 媒体直链由服务端校验归属后签名，浏览器直接从对象存储取字节；`S3_PUBLIC_ENDPOINT_URL` 是浏览器可达地址。沙箱加载文件时由后端读取对象并写入 envd，不要求沙箱能访问对象存储。
 - 密钥类配置（模型 API key、SMTP 密码、沙箱 key）使用 `SECRET_KEY` 加密入库，接口只返回是否已配置。
 - 操作日志对密码、token、Cookie、API key 递归脱敏；管理员写操作写入审计日志。
 - `SECRET_KEY` 缺失或仍为旧示例值时应用拒绝启动；更换 `SECRET_KEY` 会导致已加密配置、分享链接和邮箱验证码失效，需要重新录入或重新签发。

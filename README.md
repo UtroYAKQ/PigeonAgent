@@ -94,7 +94,7 @@ S3_ENDPOINT_URL=http://rustfs:9000
 S3_PUBLIC_ENDPOINT_URL=http://localhost:9000
 ```
 
-> `POSTGRES_PASSWORD` 与 `DATABASE_URL` 里的密码要保持一致。S3 的 `S3_ENDPOINT_URL` 给后端容器用服务名 `rustfs`；`S3_PUBLIC_ENDPOINT_URL` 是浏览器和沙箱都能访问到的地址。
+> `POSTGRES_PASSWORD` 与 `DATABASE_URL` 里的密码要保持一致。S3 的 `S3_ENDPOINT_URL` 给后端容器用服务名 `rustfs`；`S3_PUBLIC_ENDPOINT_URL` 是浏览器访问对象存储的地址。
 
 启动：
 

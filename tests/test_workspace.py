@@ -175,7 +175,7 @@ class _FakeFormats:
     async def make_dir(self, path: str) -> None:
         self.objects.append({"path": path})
 
-    async def write(self, path: str, data: bytes) -> None:
+    async def write(self, path: str, data: bytes, request_timeout: float | None = None) -> None:
         self.written[path] = data
 
     async def read(self, path: str, format: str = "text") -> bytes:
@@ -228,8 +228,8 @@ def _record(
     return record
 
 
-async def test_sandbox_resolve_keys_downloads_signed_url(db_session: AsyncSession) -> None:
-    """大文件不让后端推 envd，改由沙箱 curl 对象存储签名 URL。"""
+async def test_sandbox_resolve_keys_writes_storage_bytes(db_session: AsyncSession) -> None:
+    """load_files 从对象存储取字节，再经 files.write 推到 envd。"""
     body = "文件内容".encode()
     record = _record(db_session, "说明.txt", body)
     await db_session.commit()
@@ -245,55 +245,44 @@ async def test_sandbox_resolve_keys_downloads_signed_url(db_session: AsyncSessio
 
     assert entries[0]["saved_as"] == "说明.txt"
     assert entries[0]["size"] == len(body)
-    assert sandbox.files.written == {}
-    assert len(sandbox.commands.calls) == 1
-    call = sandbox.commands.calls[0]
-    assert "curl " in call["command"]
-    assert "https://s3.test/" in call["command"]
-    assert f"{ws.root}/说明.txt" in call["command"]
-    assert call["cwd"] == ws.root
+    assert sandbox.files.written == {f"{ws.root}/说明.txt": body}
+    assert sandbox.commands.calls == []
     assert "error" in entries[1]
 
 
-async def test_sandbox_resolve_keys_reports_download_failure(db_session: AsyncSession) -> None:
+async def test_sandbox_resolve_keys_reports_storage_failure(db_session: AsyncSession) -> None:
     record = _record(db_session, "missing.txt", b"gone")
     await db_session.commit()
 
     sandbox = _FakeSandbox()
-    sandbox.commands = _FakeCommands(exit_code=1)
     ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-4", sandbox)
     entries = await ws.resolve_keys(db_session, [str(record.id)])
 
-    assert "下载到沙箱失败" in entries[0]["error"]
+    assert "读取对象存储失败" in entries[0]["error"]
     assert sandbox.files.written == {}
 
 
-class _LoopbackStorage(FakeStorage):
-    async def url_for(
-        self,
-        key: str,
-        *,
-        download_name: str | None = None,
-        inline: bool = False,
-        content_type: str | None = None,
-        ttl_seconds: int | None = None,
-    ) -> str:
-        return f"http://127.0.0.1:9000/{key}"
+class _BrokenFiles(_FakeFormats):
+    async def write(self, path: str, data: bytes, request_timeout: float | None = None) -> None:
+        raise OSError("envd down")
 
 
-async def test_sandbox_resolve_keys_rejects_loopback_storage(
-    db_session: AsyncSession,
-) -> None:
-    """本机对象存储沙箱访问不到，提前提示配置公网地址，不去跑一次必失败的下载。"""
-    record = _record(db_session, "x.txt", b"x")
+async def test_sandbox_resolve_keys_reports_write_failure(db_session: AsyncSession) -> None:
+    body = b"x"
+    record = _record(db_session, "x.txt", body)
     await db_session.commit()
 
+    storage = FakeStorage()
+    blob = await db_session.get(Blob, record.blob_hash)
+    assert blob is not None
+    await storage.put(blob.storage_key, body, None)
+
     sandbox = _FakeSandbox()
-    ws = SandboxWorkspace(_LoopbackStorage(), uuid.uuid4(), "run-loop", sandbox)
+    sandbox.files = _BrokenFiles()
+    ws = SandboxWorkspace(storage, uuid.uuid4(), "run-5", sandbox)
     entries = await ws.resolve_keys(db_session, [str(record.id)])
 
-    assert "S3_PUBLIC_ENDPOINT_URL" in entries[0]["error"]
-    assert sandbox.commands.calls == []
+    assert "写入沙箱失败" in entries[0]["error"]
 
 
 async def test_sandbox_resolve_keys_rejects_other_owner(db_session: AsyncSession) -> None:
@@ -305,7 +294,7 @@ async def test_sandbox_resolve_keys_rejects_other_owner(db_session: AsyncSession
     entries = await ws.resolve_keys(db_session, [str(record.id)], owner_id=uuid.uuid4())
 
     assert entries[0]["error"] == "文件不存在或已被删除"
-    assert sandbox.commands.calls == []
+    assert sandbox.files.written == {}
 
 
 async def test_sandbox_workspace_write_read() -> None:

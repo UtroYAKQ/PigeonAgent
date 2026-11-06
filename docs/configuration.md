@@ -42,7 +42,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 | 变量 | 说明 |
 | --- | --- |
 | `S3_ENDPOINT_URL` | 后端访问地址。Compose 里填 `http://rustfs:9000`；OSS 填地域 endpoint。 |
-| `S3_PUBLIC_ENDPOINT_URL` | 浏览器和沙箱访问地址。启用沙箱时必须能被沙箱访问（`load_files` 由沙箱 curl 该地址）；HTTPS 站点必须填 HTTPS，否则图片会被混合内容拦截。 |
+| `S3_PUBLIC_ENDPOINT_URL` | 浏览器访问地址。媒体直链和上传签名都使用该地址；HTTPS 站点必须填 HTTPS，否则图片会被混合内容拦截。 |
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | 访问凭证。 |
 | `S3_ADDRESSING_STYLE` | MinIO / RustFS 用 `path`，OSS 用 `virtual`。 |
 | `S3_PREFIX` | 对象 key 根前缀。 |
