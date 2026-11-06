@@ -109,11 +109,17 @@ def content_to_json(content: Any) -> Any:
     if content is None or isinstance(content, (str, int, float, bool)):
         return content
     if isinstance(content, BinaryContent):
-        return {
+        value: dict[str, Any] = {
             "media": "binary",
             "media_type": str(content.media_type),
-            "data": base64.b64encode(content.data).decode("ascii"),
         }
+        # view_image 等工具已有持久资源时，Item 只留引用；没有引用的旧工具结果仍保留内联字节。
+        resource_ref = getattr(content, "_identifier", None)
+        if resource_ref:
+            value.update({"resource": resource_ref, "size": len(content.data)})
+        else:
+            value["data"] = base64.b64encode(content.data).decode("ascii")
+        return value
     if isinstance(content, FileUrl):
         for kind, url_type in _URL_BY_KIND.items():
             if isinstance(content, url_type):
@@ -126,20 +132,55 @@ def content_to_json(content: Any) -> Any:
     return to_json_value(content)
 
 
-def content_from_json(value: Any) -> Any:
+def content_from_json(value: Any, media: Mapping[str, tuple[bytes, str]] | None = None) -> Any:
     """``content_to_json`` 的逆变换；没有 media 标记的老数据原样返回。"""
     if isinstance(value, list):
-        return [content_from_json(element) for element in value]
+        return [content_from_json(element, media) for element in value]
     if isinstance(value, dict):
         kind = value.get("media")
         if kind == "binary":
-            return BinaryContent(
-                data=base64.b64decode(value["data"]), media_type=value["media_type"]
-            )
+            media_type = value["media_type"]
+            resource_ref = value.get("resource")
+            if isinstance(resource_ref, str):
+                entry = (media or {}).get(resource_ref)
+                if entry is None:
+                    return resource_tag(resource_ref, "image", media_type)
+                return BinaryContent(
+                    data=entry[0],
+                    media_type=entry[1],
+                    identifier=resource_ref,
+                )
+            return BinaryContent(data=base64.b64decode(value["data"]), media_type=media_type)
         url_type = _URL_BY_KIND.get(kind) if isinstance(kind, str) else None
         if url_type is not None:
             return url_type(url=value["url"])
+        return {key: content_from_json(item, media) for key, item in value.items()}
     return value
+
+
+def media_file_ids(items: Sequence[RunItem]) -> list[str]:
+    """收集拼上下文时需要从对象存储取回的媒体资源 id。"""
+
+    def refs(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [ref for element in value for ref in refs(element)]
+        if isinstance(value, dict):
+            found: list[str] = []
+            resource = value.get("resource")
+            if isinstance(resource, str):
+                found.append(resource)
+            for element in value.values():
+                found.extend(refs(element))
+            return found
+        return []
+
+    file_ids: list[str] = []
+    for item in items:
+        if isinstance(item, (ImageItem, VideoItem)) and item.file_id:
+            file_ids.append(item.file_id)
+        elif isinstance(item, ToolResultItem):
+            file_ids.extend(refs(item.content))
+    return list(dict.fromkeys(key for key in file_ids if key))
 
 
 def usage_delta(total: TokenUsage, prior: TokenUsage | None) -> TokenUsage:
@@ -194,8 +235,10 @@ def _user_content(item: RunItem, media: Mapping[str, tuple[bytes, str]] | None =
     return None
 
 
-def _tool_return_part(item: ToolResultItem) -> ToolReturnPart | RetryPromptPart:
-    content = content_from_json(item.content)
+def _tool_return_part(
+    item: ToolResultItem, media: Mapping[str, tuple[bytes, str]] | None = None
+) -> ToolReturnPart | RetryPromptPart:
+    content = content_from_json(item.content, media)
     if item.outcome == "retried":
         return RetryPromptPart(
             content=content if isinstance(content, (str, list)) else str(content),
@@ -513,7 +556,7 @@ class _MessageBuilder:
                 self._side = "request"
             if isinstance(item, ToolResultItem):
                 self._flush_user_contents()
-                self._request_parts.append(_tool_return_part(item))
+                self._request_parts.append(_tool_return_part(item, self.media))
             elif isinstance(item, TextItem) and item.role == "system":
                 self._flush_user_contents()
                 self._request_parts.append(SystemPromptPart(content=item.text))

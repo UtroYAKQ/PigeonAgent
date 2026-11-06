@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic_ai.messages import BinaryContent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools.workspace import workspace_tools
@@ -120,6 +121,49 @@ async def test_publish_file_uploads_as_owner(
         blob = await db.get(Blob, record.blob_hash)
         assert blob is not None
         assert storage.objects[blob.storage_key] == "发布内容".encode()
+
+
+async def test_view_image_returns_binary_content_and_saves_resource(
+    tmp_path: Path, db_session_factory: Any
+) -> None:
+    owner = uuid.uuid4()
+    image = b"\x89PNG\r\n\x1a\npreview"
+    storage = FakeStorage()
+    settings = Settings(secret_key="x" * 44, workspace_root=str(tmp_path))
+    ws = LocalWorkspace(settings, storage, uuid.uuid4(), "run-view")
+    ws.root.mkdir(parents=True, exist_ok=True)
+    (ws.root / "assets" / "preview.png").parent.mkdir(parents=True, exist_ok=True)
+    (ws.root / "assets" / "preview.png").write_bytes(image)
+
+    view_image = next(
+        tool
+        for tool in workspace_tools(ws, db_session_factory, owner_id=owner, settings=settings)
+        if tool.name == "view_image"
+    )
+    result = await view_image.function("assets/preview.png")
+
+    assert isinstance(result, BinaryContent)
+    assert result.data == image
+    assert result.media_type == "image/png"
+    async with db_session_factory() as db:
+        record = await db.get(FileRecord, __import__("uuid").UUID(result.identifier))
+        assert record is not None and record.owner_id == owner
+        blob = await db.get(Blob, record.blob_hash)
+        assert blob is not None
+        assert storage.objects[blob.storage_key] == image
+
+
+async def test_view_image_rejects_non_image(tmp_path: Path, db_session_factory: Any) -> None:
+    settings = Settings(secret_key="x" * 44, workspace_root=str(tmp_path))
+    ws = LocalWorkspace(settings, FakeStorage(), uuid.uuid4(), "run-view-error")
+    await ws.put_file("note.txt", "not an image")
+    view_image = next(
+        tool
+        for tool in workspace_tools(ws, db_session_factory, owner_id=None, settings=settings)
+        if tool.name == "view_image"
+    )
+
+    assert "只支持" in (await view_image.function("note.txt"))["error"]
 
 
 async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> None:

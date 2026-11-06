@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import codec
 from app.agents.base import BaseAgent
 from app.agents.store import SessionStore
+from app.core.config import Settings
 from app.core.exceptions import ConfigurationError
 from app.db.types import dump_message, load_message
 from app.domain.run_items import (
@@ -30,6 +31,7 @@ from app.domain.run_items import (
 from app.enums import RunStatus
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
+from app.services import file_service
 from app.services import run_store as run_service
 from tests.helpers import (
     append_run,
@@ -40,6 +42,7 @@ from tests.helpers import (
     path,
     user,
 )
+from tests.test_files import FakeStorage
 
 
 class HistoryAgent(BaseAgent):
@@ -189,6 +192,57 @@ def test_tool_return_media_round_trips() -> None:
     assert elements[1].data == raw
     assert isinstance(elements[2], ImageUrl)
     assert elements[2].url == "https://example.com/a.png"
+
+
+async def test_context_rehydrates_referenced_tool_image(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = b"\x89PNG\r\n\x1a\npixels"
+    storage = FakeStorage()
+    settings = Settings(secret_key="x" * 44)
+    record = await file_service.direct_upload(
+        db_session, settings, storage, None, "view.png", "image/png", raw
+    )
+    monkeypatch.setattr(file_service, "get_storage", lambda: storage)
+    item = codec.tool_result_item(
+        ToolReturnPart(
+            tool_name="view_image",
+            content=BinaryContent(
+                data=raw,
+                media_type="image/png",
+                identifier=str(record.id),
+            ),
+            tool_call_id="call-view",
+        )
+    )
+
+    # Item 里只留资源引用，完整 base64 绝不塞进 run.content 的 JSON。
+    assert item.content == {
+        "media": "binary",
+        "media_type": "image/png",
+        "resource": str(record.id),
+        "size": len(raw),
+    }
+    assert "data" not in item.content
+    assert base64.b64encode(raw).decode("ascii") not in item.model_dump_json()
+
+    session_id = await make_session(db_session)
+    await run_service.create_run(
+        db_session,
+        session_id,
+        run_id=uuid4(),
+        content=[item],
+    )
+    built = await run_service.build_context(db_session, session_id)
+    result = next(
+        part
+        for message in built.messages
+        for part in message.parts
+        if isinstance(part, ToolReturnPart)
+    )
+    assert isinstance(result.content, BinaryContent)
+    assert result.content.data == raw
+    assert result.content.identifier == str(record.id)
 
 
 def test_model_file_part_becomes_display_media_item() -> None:

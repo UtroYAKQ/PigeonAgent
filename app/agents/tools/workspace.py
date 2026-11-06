@@ -14,6 +14,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from pydantic_ai import Tool
+from pydantic_ai.messages import BinaryContent
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
@@ -21,6 +22,7 @@ from app.sandbox.workspace import RunWorkspace, SandboxWorkspace, WorkspaceError
 from app.services import file_service
 
 logger = logging.getLogger(__name__)
+_MAX_VIEW_IMAGE_BYTES = 8 * 1024 * 1024
 
 
 def workspace_tools(
@@ -72,6 +74,38 @@ def workspace_tools(
             return _fail("read_file", exc)
         return result
 
+    async def view_image(path: str) -> BinaryContent | dict[str, Any]:
+        """读取工作区图片并把完整像素作为原生图片内容返回，供你直接查看。
+
+        Args:
+            path: 相对工作区根的图片路径，例如 assets/preview.png。
+        """
+        name = PurePosixPath(str(path).replace("\\", "/")).name or "image"
+        media_type = mimetypes.guess_type(name)[0]
+        if not media_type or not media_type.startswith("image/"):
+            return {"error": "view_image 只支持能识别格式的图片文件"}
+        max_bytes = min(settings.max_upload_bytes, _MAX_VIEW_IMAGE_BYTES)
+        try:
+            data = await workspace.read_binary(path, max_bytes=max_bytes)
+        except Exception as exc:
+            return _fail("view_image", exc)
+
+        store = workspace.storage
+        if store is None:
+            return {"error": "对象存储未启用，无法保存 view_image 的资源引用"}
+        try:
+            async with factory() as db:
+                record = await file_service.direct_upload(
+                    db, settings, store, owner_id, name, media_type, data
+                )
+        except Exception as exc:
+            return _fail("view_image", exc)
+        return BinaryContent(
+            data=data,
+            media_type=media_type,
+            identifier=str(record.id),
+        )
+
     async def list_files(subdir: str = ".") -> dict[str, Any]:
         """列工作区目录的内容。
 
@@ -117,6 +151,7 @@ def workspace_tools(
         Tool(load_files),
         Tool(write_file),
         Tool(read_file),
+        Tool(view_image),
         Tool(list_files),
         Tool(publish_file),
     ]
@@ -161,6 +196,7 @@ def workspace_instructions() -> str:
         "要把文件（含图片/视频）落进本轮工作区处理，"
         "先调 load_files（把 storage_key 传进去），"
         "它会以 original_name 落进工作区，之后的 write_file / read_file 都用相对路径。"
+        "要看清工作区里的图片，调用 view_image，它会把图片像素直接放进工具结果里。"
         "工作区里的文件不会自动出现在会话里；只有调用 publish_file 才会上传成新的 "
         "<resource/> 并给用户下载入口，所以需要交付的文件要主动发布。"
         "需要看文本内容时用 read_file 范围读取。"

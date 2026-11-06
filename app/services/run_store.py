@@ -24,13 +24,11 @@ from app.domain.run_items import (
     ApprovalRequestItem,
     CallRequestItem,
     CompactionItem,
-    ImageItem,
     PendingInterrupt,
     PendingInterrupts,
     RunItem,
     TokenUsage,
     ToolResultItem,
-    VideoItem,
 )
 from app.enums import RunKind, RunStatus
 from app.models.session import ChatSession
@@ -340,13 +338,8 @@ async def build_context(
         (run, first_items if index == 0 and first_items is not None else run.content)
         for index, run in enumerate(runs)
     ]
-    # 落库的 ImageItem/VideoItem 只存 file_id；回放时把字节取回来喂模型
-    media_ids = [
-        item.file_id
-        for _, items in slices
-        for item in items
-        if isinstance(item, (ImageItem, VideoItem)) and item.file_id
-    ]
+    # 落库媒体只存 FileRecord id；回放时把字节取回来，补回 ImageItem 或 ToolResultItem。
+    media_ids = codec.media_file_ids([item for _, items in slices for item in items])
     media = await file_service.load_media(db, media_ids)
     for run, items in slices:
         messages.extend(codec.messages_from_items(items, usage=run.usage, media=media))
