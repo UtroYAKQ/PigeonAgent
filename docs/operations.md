@@ -9,7 +9,7 @@
 | `postgres` | 业务数据库 |
 | `redis` | SSE 事件流与跨进程 run 租约（可选，但生产建议） |
 | `rustfs` / `rustfs-init` | S3 兼容对象存储与桶初始化 |
-| `backend` | FastAPI；启动时先执行 `alembic upgrade head`，再跑单 worker uvicorn |
+| `backend` | FastAPI；启动时先执行 `alembic upgrade head`，再按 `WEB_CONCURRENCY`（默认 2）启动 uvicorn workers |
 | `frontend` | 多阶段构建的 Vue 静态站点；nginx 把 `/api` 反代到 backend |
 
 ## 启动

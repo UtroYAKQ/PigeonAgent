@@ -18,4 +18,5 @@ COPY migrations ./migrations
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1"]
+# 配了 REDIS_URL 才允许多 worker；默认 2，可用 WEB_CONCURRENCY 覆盖
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2}"]
