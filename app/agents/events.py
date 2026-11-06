@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from pydantic_ai import DeferredToolRequests
@@ -71,15 +71,30 @@ class ImageGeneratedEvent(CustomEvent):
     alt: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ArtifactMedia:
+    """一条产物引用；事件和落库共用同一份 typed 载荷。"""
+
+    file_id: str
+    name: str
+    media_type: str
+    size: int = 0
+    alt: str | None = None
+    origin: str = "workspace"
+
+
 @dataclass(kw_only=True)
 class ArtifactEvent(CustomEvent):
     """工作区发布的产物。
 
-    入库和推送分开：Item 决定它在 run.content 里的位置（回放与分支都靠它），
-    这个事件只负责让前端在流式阶段立刻把产物渲染出来，不用等 run 结束。
+    turn 收到后落 ResourceItem（只给历史和前端，不进模型上下文）；
+    事件本身让前端在流式阶段立刻把卡片渲染出来，不用等 run 结束。
     """
 
-    media: list[dict[str, Any]]
+    media: list[ArtifactMedia]
+
+    def to_payload(self) -> Any:
+        return {"media": [asdict(media) for media in self.media]}
 
 
 @dataclass(kw_only=True)

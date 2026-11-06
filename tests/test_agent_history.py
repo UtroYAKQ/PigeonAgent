@@ -7,6 +7,7 @@ from pydantic_ai.messages import (
     BinaryContent,
     FilePart,
     ImageUrl,
+    ModelRequest,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -189,6 +190,16 @@ def test_tool_return_media_round_trips() -> None:
     assert elements[1].data == raw
     assert isinstance(elements[2], ImageUrl)
     assert elements[2].url == "https://example.com/a.png"
+
+
+def test_imported_binary_without_file_id_is_display_only() -> None:
+    """导入路径拿不到 file_id：二进制只能展示，不能声称自己进上下文。"""
+    message = ModelRequest(
+        parts=[UserPromptPart(content=["看图", BinaryContent(data=b"png", media_type="image/png")])]
+    )
+    items = codec.items_from_message(message)
+    image = next(item for item in items if isinstance(item, ImageItem))
+    assert image.in_context is False
 
 
 def test_model_file_part_becomes_display_media_item() -> None:

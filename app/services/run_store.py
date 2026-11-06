@@ -340,13 +340,20 @@ async def build_context(
         (run, first_items if index == 0 and first_items is not None else run.content)
         for index, run in enumerate(runs)
     ]
-    # 落库的 ImageItem/VideoItem 只存 file_id；回放时把字节取回来喂模型
+    # 只有会进上下文的媒体才取字节；展示用的生成图不要每轮白下载一遍
     media_ids = [
         item.file_id
         for _, items in slices
         for item in items
-        if isinstance(item, (ImageItem, VideoItem)) and item.file_id
+        if item.in_context and isinstance(item, (ImageItem, VideoItem)) and item.file_id
     ]
+    # 读图工具的结果把 base64 剥进了 metadata；同样按 file_id 取回来
+    for _, items in slices:
+        for item in items:
+            if isinstance(item, ToolResultItem) and item.in_context:
+                file_id = codec.tool_result_file_id(item)
+                if file_id:
+                    media_ids.append(file_id)
     media = await file_service.load_media(db, media_ids)
     for run, items in slices:
         messages.extend(codec.messages_from_items(items, usage=run.usage, media=media))

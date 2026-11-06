@@ -8,8 +8,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic_ai.models.test import TestModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.base import BaseAgent
 from app.agents.tools.workspace import workspace_tools
 from app.core.config import Settings
 from app.models.blob import Blob
@@ -29,6 +31,15 @@ LONG_TEXT = "alpha\nbeta\ngamma\ndelta\nepsilon\n"
 def _local(tmp_path: Path, run_id: str = "run-1") -> LocalWorkspace:
     settings = SimpleNamespace(workspace_root=str(tmp_path))
     return LocalWorkspace(settings, FakeStorage(), uuid.uuid4(), run_id)
+
+
+class _Ctx:
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    async def emit(self, event: Any) -> Any:
+        self.events.append(event)
+        return event
 
 
 # ------------------------------------------------------------------ text_read
@@ -109,10 +120,15 @@ async def test_publish_file_uploads_as_owner(
 
     tools = workspace_tools(ws, db_session_factory, owner_id=owner, settings=settings)
     publish = next(tool for tool in tools if tool.name == "publish_file")
-    result = await publish.function("报告.txt")
+    ctx = _Ctx()
+    result = await publish.function(ctx, "报告.txt")
 
     assert result["name"] == "报告.txt"
     assert result["size"] == len("发布内容".encode())
+    assert len(ctx.events) == 1
+    media = ctx.events[0].media[0]
+    assert media.file_id == result["storage_key"]
+    assert media.origin == "workspace"
     async with db_session_factory() as db:
         record = await db.get(FileRecord, uuid.UUID(result["storage_key"]))
         assert record is not None and record.owner_id == owner
@@ -120,6 +136,33 @@ async def test_publish_file_uploads_as_owner(
         blob = await db.get(Blob, record.blob_hash)
         assert blob is not None
         assert storage.objects[blob.storage_key] == "发布内容".encode()
+
+
+async def test_agent_adds_read_image_only_with_storage(
+    tmp_path: Path, db_session: AsyncSession, db_session_factory: Any
+) -> None:
+    class Agent(BaseAgent):
+        name = "tool-assembly"
+
+    settings = Settings(secret_key="x" * 44, workspace_root=str(tmp_path))
+    with_storage = LocalWorkspace(settings, FakeStorage(), uuid.uuid4(), "run-a")
+
+    def names(workspace: Any, profile: Any = None) -> set[str]:
+        agent = Agent(
+            TestModel(call_tools=[], profile=profile),
+            db=db_session,
+            session_id=uuid.uuid4(),
+            session_factory=db_session_factory,
+            workspace=workspace,
+        )
+        return {tool.name for tool in agent.default_tools()}
+
+    assert "read_image" in names(with_storage)
+
+    bare = LocalWorkspace(settings, None, uuid.uuid4(), "run-b")
+    assert "read_image" not in names(bare)
+
+    assert "read_image" not in names(with_storage, {"supports_image_input": False})
 
 
 async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> None:
@@ -130,7 +173,7 @@ async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> N
         for tool in workspace_tools(ws, db_session_factory, owner_id=None, settings=settings)
         if tool.name == "publish_file"
     )
-    missing = await publish.function("nope.bin")
+    missing = await publish.function(_Ctx(), "nope.bin")
     assert "不在工作区" in missing["error"]
 
     await ws.put_file("big.bin", "x" * 2048)
@@ -140,7 +183,7 @@ async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> N
         for tool in workspace_tools(ws, db_session_factory, owner_id=None, settings=small)
         if tool.name == "publish_file"
     )
-    too_big = await publish_small.function("big.bin")
+    too_big = await publish_small.function(_Ctx(), "big.bin")
     assert "上限" in too_big["error"]
 
     bare = LocalWorkspace(settings, None, uuid.uuid4(), "run-pub3")
@@ -150,7 +193,7 @@ async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> N
         for tool in workspace_tools(bare, db_session_factory, owner_id=None, settings=settings)
         if tool.name == "publish_file"
     )
-    assert "对象存储未启用" in (await publish_bare.function("a.txt"))["error"]
+    assert "对象存储未启用" in (await publish_bare.function(_Ctx(), "a.txt"))["error"]
 
 
 async def test_list_files_nests_and_errors(tmp_path: Path) -> None:

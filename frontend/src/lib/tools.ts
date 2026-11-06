@@ -42,6 +42,7 @@ const TOOL_ICONS: Record<string, string> = {
   publish_file: 'upload',
   make_chart: 'image',
   generate_image: 'image',
+  read_image: 'image',
   web_search: 'search',
   search: 'search',
   file_search: 'search',
@@ -71,6 +72,7 @@ const TOOL_NAMES: Record<string, string> = {
   ui_open_html_preview: '准备页面预览',
   make_chart: '生成图表',
   generate_image: '生成图片',
+  read_image: '读取图片',
 }
 
 /**
@@ -102,6 +104,7 @@ const TOOL_COPY: Record<string, ToolCopy> = {
   },
   make_chart: { running: '正在生成图表', done: '图表已生成', paused: '图表生成已暂停' },
   generate_image: { running: '正在生成图片', done: '图片已生成', paused: '图片生成已停止' },
+  read_image: { running: '正在读取图片', done: '图片已读取', failed: '图片读取失败' },
   web_search: { running: '正在搜索网页', done: '搜索完成', failed: '搜索失败', paused: '搜索已暂停' },
   fetch_url: { running: '正在读取网页', done: '网页已读取', failed: '网页读取失败', paused: '网页读取已暂停' },
   ui_open_html_preview: { running: '正在生成预览', done: '预览已生成' },
@@ -129,12 +132,13 @@ export function toolLabel(name: string, state: ToolState): string {
 
 function toolDetail(name: string, args: unknown): string | null {
   // 文件工具的参数可能是半截 JSON（流式中断），优先取文件名，别再显示整段原始 JSON
-  if (name === 'read_file' || name === 'write_file' || name === 'publish_file') {
+  if (name === 'read_file' || name === 'write_file' || name === 'publish_file' || name === 'read_image') {
     const value = parseJsonLike(args)
     if (value && typeof value === 'object') {
       const data = value as Record<string, unknown>
       if (typeof data.name === 'string') return data.name
       if (typeof data.path === 'string') return data.path
+      if (typeof data.source === 'string') return data.source
     }
     if (typeof value === 'string') {
       const match = /"(?:name|path)"\s*:\s*"((?:\\.|[^"\\])*)"/.exec(value)

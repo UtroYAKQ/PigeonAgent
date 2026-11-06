@@ -382,6 +382,7 @@ async def execute_run(
                 session_factory=session_factory,
                 run_id=run_id,
                 tools=[*wtools, *search_tools],
+                workspace=workspace,
                 prompt=workspace_instructions() if wtools else None,
                 context_window=resolved.context_window,
                 compaction_threshold=(

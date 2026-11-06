@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from uuid import UUID
 
 from ag_ui.core import BaseEvent
@@ -25,10 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.agents.agui import AguiRunner
 from app.agents.prompts import BASE_INSTRUCTIONS
 from app.agents.store import SessionStore, UsageObserver
-from app.agents.tools import get_current_time, make_generate_image
+from app.agents.tools import get_current_time, make_generate_image, make_read_image
 from app.agents.turn import AgentTurn
 from app.core.config import DEFAULT_COMPACTION_THRESHOLD, Settings, get_settings
 from app.core.exceptions import ConfigurationError
+
+if TYPE_CHECKING:
+    from app.sandbox.workspace import RunWorkspace
 
 
 class BaseAgent:
@@ -46,6 +49,7 @@ class BaseAgent:
         model_settings: ModelSettings | None = None,
         tools: Sequence[Tool[Any]] = (),
         capabilities: Sequence[AgentCapability[Any]] = (),
+        workspace: RunWorkspace | None = None,
         output_type: Any = (str, DeferredToolRequests),
         db: AsyncSession | None = None,
         session_id: UUID | None = None,
@@ -61,7 +65,9 @@ class BaseAgent:
         on_usage: UsageObserver | None = None,
     ) -> None:
         # default_tools() 在构造期就会用到这几个依赖，必须先赋值
+        self._model = model
         self._session_factory = session_factory
+        self._workspace = workspace
         self._owner_id = owner_id
         self._enable_image_generation = enable_image_generation
         self._image_model_id = image_model_id
@@ -111,6 +117,24 @@ class BaseAgent:
                         settings=self._settings,
                         run_id=self._current_run_id,
                         image_model_id=self._image_model_id,
+                    )
+                )
+            )
+        # 有工作区和对象存储、模型也能收图，才提供读图入口
+        if (
+            self._session_factory is not None
+            and self._workspace is not None
+            and self._workspace.storage is not None
+            and self._model.profile.get("supports_image_input", True)
+        ):
+            tools.append(
+                Tool(
+                    make_read_image(
+                        self._session_factory,
+                        owner_id=self._owner_id,
+                        settings=self._settings,
+                        storage=self._workspace.storage,
+                        workspace=self._workspace,
                     )
                 )
             )

@@ -13,9 +13,10 @@ import uuid
 from pathlib import PurePosixPath
 from typing import Any
 
-from pydantic_ai import Tool
+from pydantic_ai import RunContext, Tool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.agents.events import ArtifactEvent, ArtifactMedia
 from app.core.config import Settings
 from app.sandbox.workspace import RunWorkspace, SandboxWorkspace, WorkspaceError
 from app.services import file_service
@@ -84,7 +85,7 @@ def workspace_tools(
             return _fail("list_files", exc)
         return result
 
-    async def publish_file(path: str) -> dict[str, Any]:
+    async def publish_file(ctx: RunContext[Any], path: str) -> dict[str, Any]:
         """把工作区里的文件上传到云端存储，用户即可在页面上直接下载。
 
         Args:
@@ -106,11 +107,25 @@ def workspace_tools(
                 )
         except Exception as exc:
             return _fail("publish_file", exc)
+        media_type = record.content_type or mime
+        # 产物卡片由工具直接推给前端；进历史的 ResourceItem 仍由 turn 从工具结果派生
+        await ctx.emit(
+            ArtifactEvent(
+                media=[
+                    ArtifactMedia(
+                        file_id=str(record.id),
+                        name=record.name,
+                        media_type=media_type,
+                        size=record.size,
+                    )
+                ]
+            )
+        )
         return {
             "storage_key": str(record.id),
             "name": record.name,
             "size": record.size,
-            "media_type": record.content_type or mime,
+            "media_type": media_type,
         }
 
     tools = [
@@ -156,12 +171,13 @@ def workspace_instructions() -> str:
         "## 文件资源\n"
         "会话里的文件、图片和视频都以 "
         '<resource storage_key=".." original_name=".." mime_type=".."/> 表示：'
-        "storage_key 是取用凭据，original_name 是给用户的文件名；"
-        "图片/视频的内容同时会直接展示给你。"
+        "storage_key 是取用凭据，original_name 是给用户的文件名。"
+        "用户直接上传的图片已经能看见；其他图片（工具产物、工作区文件）用 read_image 读取，"
+        "传 storage_key 或工作区相对路径，不要用 read_file 读图片。"
         "要把文件（含图片/视频）落进本轮工作区处理，"
         "先调 load_files（把 storage_key 传进去），"
         "它会以 original_name 落进工作区，之后的 write_file / read_file 都用相对路径。"
-        "工作区里的文件不会自动出现在会话里；只有调用 publish_file 才会上传成新的 "
-        "<resource/> 并给用户下载入口，所以需要交付的文件要主动发布。"
+        "工作区里的文件不会自动出现在会话里；只有调用 publish_file 才会上传成可下载的产物，"
+        "所以需要交付的文件要主动发布。"
         "需要看文本内容时用 read_file 范围读取。"
     )

@@ -76,6 +76,7 @@ from app.domain.run_items import (
     CompactionItem,
     ErrorItem,
     ImageItem,
+    ResourceItem,
     RunItem,
     TextItem,
     ThinkingItem,
@@ -348,28 +349,31 @@ class AgentTurn:
         # 逐张落库，取消或失败时已出的图不会丢
         await self._store.flush()
 
-    async def _on_tool_result(self, event: ToolResultEvent) -> None:
-        turn_items: list[RunItem] = [codec.tool_result_item(event.part)]
-        published = codec.published_resource(event.part)
-        if published is not None:
-            turn_items.append(published)
-        await self._store.append_items(turn_items)
-        if published is not None:
-            # 落库之后再推事件：前端拿到卡片时数据已经在了，刷新也不会丢
-            self._outbox.append(
-                ArtifactEvent(
-                    media=[
-                        {
-                            "file_id": published.storage_key,
-                            "media_type": published.media_type,
-                            "name": published.name,
-                            "size": published.size,
-                            "alt": None,
-                            "origin": "workspace",
-                        }
-                    ]
-                )
+    async def _on_artifact(self, event: ArtifactEvent) -> None:
+        """产物工具只发事件；ResourceItem 的落库仍统一由 turn 负责。"""
+        items = [
+            ResourceItem(
+                role="assistant",
+                storage_key=media.file_id,
+                name=media.name,
+                media_type=media.media_type,
+                size=media.size,
+                in_context=False,
             )
+            for media in event.media
+            if media.file_id
+        ]
+        if not items:
+            return
+        await self._store.append_items(items)
+        await self._store.flush()
+
+    async def _on_tool_result(self, event: ToolResultEvent) -> None:
+        part = event.part
+        # 有引用的媒体先剥原始二进制再建 item，避免先 base64 编码再丢弃
+        if codec.media_file_id(getattr(part, "metadata", None)):
+            part = replace(part, content=codec.without_binary_media(part.content))
+        await self._store.append_items([codec.tool_result_item(part)])
 
     async def _on_approval_request(self, event: ApprovalRequestEvent) -> None:
         await self._store.append_items(
@@ -410,6 +414,7 @@ class AgentTurn:
         PartDeltaEvent: _on_part_delta,
         PartEndEvent: _on_part_end,
         ImageGeneratedEvent: _on_image_generated,
+        ArtifactEvent: _on_artifact,
         ToolResultEvent: _on_tool_result,
         ApprovalRequestEvent: _on_approval_request,
         CallRequestEvent: _on_call_request,
@@ -456,12 +461,17 @@ class AgentTurn:
 
 
 def _reported_tool_outcome(event: Any) -> Any:
-    """工具把失败写进结果体时，统一把 outcome 标成 failed 再交给 AG-UI 适配器。"""
-    if not isinstance(event, ToolResultEvent) or event.part.outcome != "success":
+    """上报给前端的工具结果：先剥掉 base64 图片，再把失败体统一标成 failed。"""
+    if not isinstance(event, ToolResultEvent):
         return event
-    if not codec.content_reports_failure(event.part.content):
-        return event
-    return replace(event, part=replace(event.part, outcome="failed"))
+    part = event.part
+    if codec.media_file_id(part.metadata):
+        content = codec.without_binary_media(part.content)
+        if content is not part.content:
+            part = replace(part, content=content)
+    if part.outcome == "success" and codec.content_reports_failure(part.content):
+        part = replace(part, outcome="failed")
+    return event if part is event.part else replace(event, part=part)
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,6 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.domain.file_ref import FileIdRef
 from app.enums import ItemType
 
+# 工具结果 metadata 里指向被剥出媒体文件的键；工具登记、codec 回填共用
+MEDIA_FILE_ID_KEY = "media_file_id"
+
 USAGE_FIELDS = (
     "requests",
     "input_tokens",
@@ -129,6 +132,8 @@ class VideoItem(BaseItem):
 
 
 class FileItem(BaseItem):
+    """历史遗留的 base64 载体：只给前端展示，没有 file_id 就回放不进模型上下文。"""
+
     type: Literal[ItemType.FILE] = ItemType.FILE
     role: Literal["user", "assistant"] = "user"
     name: str
