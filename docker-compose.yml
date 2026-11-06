@@ -93,6 +93,15 @@ services:
       - .env
     ports:
       - "127.0.0.1:8000:8000"
+    # 代码走宿主目录挂载：发版只换文件 + 重启容器，不重建依赖层
+    volumes:
+      - ./app:/app/app:ro
+      - ./migrations:/app/migrations:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers $${WEB_CONCURRENCY:-2}
     depends_on:
       postgres:
         condition: service_healthy
