@@ -17,11 +17,11 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="PigeonAgent 演示：对话、HTML 预览与用量" width="100%" />
+  <img src="docs/assets/demo.gif" alt="PigeonAgent 演示：提问、流式回复、HTML 预览与代码预览" width="600" />
 </p>
 
 <p align="center">
-  <sub>演示：发送消息 → 流式回复 → HTML 预览 → 用量统计；<a href="docs/assets/demo.webm">观看完整视频（WebM，约 19 秒）</a></sub>
+  <sub>演示：提问 → 流式回复 → HTML 预览 → 代码预览；<a href="docs/assets/demo.webm">观看完整视频（WebM，约 14 秒）</a></sub>
 </p>
 
 ## 功能
