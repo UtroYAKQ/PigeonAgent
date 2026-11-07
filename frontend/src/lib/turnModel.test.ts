@@ -221,6 +221,34 @@ describe('buildTurnView', () => {
     }
   })
 
+  it('ends the streaming state as soon as the run finishes', () => {
+    const view = buildTurnView(
+      run([], 'running'),
+      liveRun([{ id: 'text-1', kind: 'text', text: '完成', streaming: true }], true),
+    )
+
+    expect(view.status).toBe('completed')
+  })
+
+  it('keeps a finished live run with an error in the failed state', () => {
+    const live = liveRun([], true)
+    live.error = '模型连接失败'
+    const view = buildTurnView(run([], 'running'), live)
+
+    expect(view.status).toBe('failed')
+  })
+
+  it('keeps the finished status when merging a resumed live view', () => {
+    const baseView = buildTurnView(run([{ ...base('t1'), type: 'text', role: 'assistant', text: '前半段' }], 'running'), null)
+    const liveView = buildTurnView(
+      run([], 'running'),
+      liveRun([{ id: 'text-2', kind: 'text', text: '后半段', streaming: true }], true),
+    )
+    const merged = mergeTurnViews(baseView, liveView)
+
+    expect(merged.status).toBe('completed')
+  })
+
   it('keeps live reasoning segments interleaved with tool calls', () => {
     const view = buildTurnView(
       run([], 'running'),

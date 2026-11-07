@@ -757,7 +757,8 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     if (generation !== streamGeneration) return
-    if (liveRun.value) liveRun.value.finished = true
+    // finished 只由 RUN_FINISHED / RUN_ERROR 置位：连接断了不代表后端跑完了，
+    // 这里若强行置位会让流式态提前结束、丢掉重连兜底。
     await settleRun(sessionId, runId, generation)
   }
 

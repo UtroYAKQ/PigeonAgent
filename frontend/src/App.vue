@@ -40,18 +40,19 @@ function viewKey(viewRoute: RouteLocationNormalizedLoaded): string {
 <template>
   <!-- 触摸/鼠标点击带来的焦点不弹提示，否则手机打开抽屉时第一个可聚焦的标签会闪一下标题 -->
   <TooltipProvider :ignore-non-keyboard-focus="true">
-    <RouterView v-slot="{ Component, route: viewRoute }">
-      <Transition
-        name="page-flight"
-        mode="out-in"
-        :duration="reduceMotion ? 0 : { enter: 240, leave: 160 }"
-      >
-        <component
-          :is="Component"
-          :key="viewKey(viewRoute)"
-        />
-      </Transition>
-    </RouterView>
+    <div class="relative">
+      <RouterView v-slot="{ Component, route: viewRoute }">
+        <Transition
+          name="page-flight"
+          :duration="reduceMotion ? 0 : { enter: 240, leave: 160 }"
+        >
+          <component
+            :is="Component"
+            :key="viewKey(viewRoute)"
+          />
+        </Transition>
+      </RouterView>
+    </div>
   </TooltipProvider>
   <Toaster
     position="top-center"

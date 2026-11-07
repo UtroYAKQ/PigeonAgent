@@ -116,7 +116,8 @@ const canSend = computed(() => {
 
 const hasModel = computed(() => chat.modelsLoaded && Boolean(chat.currentModelId))
 const placeholder = computed(() => {
-  if (!hasModel.value) return '暂无可用模型'
+  // 模型列表还在路上时先沿用正常文案：首帧不要先闪一下“暂无可用模型”
+  if (chat.modelsLoaded && !chat.currentModelId) return '暂无可用模型'
   if (isEditing.value) return '编辑消息…'
   if (chat.hasPendingInterrupts) return '请先处理上方的确认卡片'
   return props.hero ? '有问题，尽管问' : '给 PigeonAgent 发送消息'
@@ -467,7 +468,7 @@ onBeforeUnmount(() => {
             </button>
           </TooltipHint>
           <button
-            v-if="chat.busy"
+            v-if="chat.isStreaming"
             type="button"
             class="grid size-8 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-85"
             :aria-label="chat.cancelling ? '正在停止' : '停止生成'"

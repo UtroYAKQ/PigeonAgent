@@ -35,7 +35,12 @@ body {
     transform 240ms var(--motion-ease-flight);
 }
 
+/* 离场页绝对定位压在新页面上方：两页重叠淡出淡入，
+   避免 out-in 在交接处露出一帧纯背景 */
 .page-flight-leave-active {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   transition:
     opacity 160ms ease-in,
     transform 160ms ease-in;

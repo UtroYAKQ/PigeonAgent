@@ -363,7 +363,9 @@ function isPendingImage(name: string, state: ToolState): boolean {
 
 /** 这一轮还在流式：块就是最新事实，落库的 content 反而落后一拍。 */
 function buildLiveView(view: TurnView, live: LiveRun): TurnView {
-  view.status = 'streaming'
+  // RUN_FINISHED 一到就收掉流式态：后端收尾（沙箱 pause、结算）可能还要几秒，
+  // SSE 连接迟迟不关，不能让转圈一直等到连接结束。
+  view.status = live.finished ? (live.error ? 'failed' : 'completed') : 'streaming'
   view.liveError = live.error
   view.liveErrorCode = live.errorCode ?? null
   const state = createSegmentState()
@@ -582,7 +584,7 @@ export function mergeTurnViews(base: TurnView | null, live: TurnView): TurnView 
     compactions: [...base.compactions, ...live.compactions],
     attachments: [...base.attachments, ...live.attachments],
     error: live.error ?? base.error,
-    status: 'streaming',
+    status: live.status,
     interrupted: false,
     cancelled: false,
     sources: mergeSources(base.sources, live.sources).slice(0, 6),

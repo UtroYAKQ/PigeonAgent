@@ -142,7 +142,8 @@ async function submitForm(): Promise<void> {
     }
     error.value = errorMessage(err)
   } finally {
-    loading.value = false
+    // 登录成功后马上要切到工作区：保持加载态到卸载，别让按钮先弹回“登录”
+    if (!auth.isAuthenticated) loading.value = false
   }
 }
 
@@ -161,7 +162,8 @@ async function submitCode(): Promise<void> {
   } catch (err) {
     error.value = errorMessage(err)
   } finally {
-    loading.value = false
+    // 登录成功后马上要切到工作区：保持加载态到卸载，别让按钮先弹回“登录”
+    if (!auth.isAuthenticated) loading.value = false
   }
 }
 
