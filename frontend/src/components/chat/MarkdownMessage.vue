@@ -43,6 +43,10 @@ const chat = useChatStore()
 const panels = usePanelStore()
 const ui = useUiStore()
 
+// 平滑输出只负责流式期间；消息一结束就把剩余字符补齐，
+// 否则工具卡、文件卡已经出现，正文还在逐字“打字”。
+const smoothOptions = { flushOnFinish: true }
+
 let labelTimer: number | null = null
 
 function clearLabelTimer(): void {
@@ -104,6 +108,7 @@ async function onClick(event: MouseEvent): Promise<void> {
       :content="props.content"
       :final="!props.streaming"
       mode="chat"
+      :smooth-streaming-options="smoothOptions"
       :custom-id="CUSTOM_ID"
       html-policy="escape"
       :custom-markdown-it="configureMarkdown"
