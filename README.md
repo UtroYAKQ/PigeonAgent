@@ -208,6 +208,10 @@ CI 会分别跑后端（SQLite）与 PostgreSQL 两套测试，以及前端 lint
 
 欢迎 issue 和 pull request。开始之前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；安全问题请按 [SECURITY.md](SECURITY.md) 私下报告，不要在公开 issue 里贴密钥或生产配置。
 
+## 讨论交流
+
+使用、部署或开发中的问题，欢迎加入 QQ 群交流：**569594623**。
+
 ## 许可证
 
 [MIT](LICENSE)。前端分发的第三方组件与许可证文本见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
