@@ -187,7 +187,13 @@ async def adjust(
     """管理员手工充值/扣减；正数充、负数扣，返回实际生效的差额。"""
     if delta == 0:
         return 0
-    user = await db.get(User, user_id)
+    # 锁住用户行：并发的出图扣费/另一笔调账不能各自读到同一个旧余额
+    user = await db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if user is None:
         raise NotFoundError(f"User {user_id} not found")
     # 扣减允许把余额压到负数；欠账由下一次充值抵扣，台账才反映真实用量
@@ -251,7 +257,14 @@ async def _charge(
     usage: dict[str, Any],
 ) -> float:
     """扣余额并写流水；余额不够就如实扣成负数，等下次充值抵扣。"""
-    user = await db.get(User, user_id)
+    # 必须先锁行再读：同一 run 可能并发出多张图、同一用户也可能并行跑多轮，
+    # 无锁的「读-改-写」会让两笔扣费按同一个旧余额结算，最终只扣到一笔。
+    user = await db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if user is None:
         return 0
     user.credits_balance -= amount
