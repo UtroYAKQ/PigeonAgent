@@ -111,6 +111,13 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         value_type=ConfigValueType.INTEGER,
     ),
     ConfigSpec(
+        key="sandbox_pause_seconds",
+        category=ConfigCategory.SANDBOX,
+        label="沙箱挂起等待（秒）",
+        description="最后一轮结束后空闲多久挂起沙箱以停止计费；0 表示下一次巡检立即挂起",
+        value_type=ConfigValueType.INTEGER,
+    ),
+    ConfigSpec(
         key="workspace_root",
         category=ConfigCategory.SANDBOX,
         label="本地工作区根目录",

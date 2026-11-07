@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -38,8 +40,14 @@ class _FailingPauseSandbox(_FakeSandbox):
         raise RuntimeError("pauseSession is not enabled")
 
 
-def _settings(idle: float = 600.0) -> SimpleNamespace:
-    return SimpleNamespace(sandbox_idle_seconds=idle)
+class _SlowPauseSandbox(_FakeSandbox):
+    async def beta_pause(self) -> None:
+        await asyncio.sleep(10)
+        self.paused = True
+
+
+def _settings(idle: float = 600.0, pause: float = 30.0) -> SimpleNamespace:
+    return SimpleNamespace(sandbox_idle_seconds=idle, sandbox_pause_seconds=pause)
 
 
 @pytest.fixture
@@ -79,15 +87,20 @@ async def test_acquire_creates_and_reuses(
     assert await pool.acquire(session, "run-2") is second  # 下一轮新建
 
 
-async def test_release_pauses_and_acquire_reconnects(
+async def test_release_defers_pause_to_idle_sweep(
     pool: SandboxPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """release 只归还使用权，pause 交给空闲巡检，别卡住 run 收尾。"""
     sandbox = _FakeSandbox("sbx-9")
     _patch(monkeypatch, created=[])  # 不允许执行中偷偷新建
     session = uuid4()
     pool._entries[session] = _Entry(sandbox=sandbox, sandbox_id="sbx-9")
 
     await pool.release(session)
+    assert not sandbox.paused  # 收尾不等 pause
+
+    pool._entries[session].last_touch = time.monotonic() - pool.settings.sandbox_pause_seconds - 1  # type: ignore[union-attr]
+    await pool._sweep_once()
     assert sandbox.paused and pool._entries[session].paused
 
     revived = SimpleNamespace(sandbox_id="sbx-9-connected")
@@ -129,24 +142,22 @@ async def test_quiet_release_falls_back_to_recreate(
     assert pool._entries[session].paused is False
 
 
-async def test_idle_sweep_kills_stale(pool: SandboxPool) -> None:
+async def test_idle_sweep_pauses_then_kills(pool: SandboxPool) -> None:
     session = uuid4()
     entry = _Entry(sandbox=_FakeSandbox("sbx-old"), sandbox_id="sbx-old")
     entry.last_touch = time.monotonic() - 10_000.0
     pool._entries[session] = entry
 
-    recent = _Entry(sandbox=_FakeSandbox("sbx-warm"), sandbox_id="sbx-warm")
+    recent_sandbox = _FakeSandbox("sbx-warm")
+    recent = _Entry(sandbox=recent_sandbox, sandbox_id="sbx-warm")
     recent.last_touch = time.monotonic()
     session2 = uuid4()
     pool._entries[session2] = recent
 
-    cutoff = time.monotonic() - pool.settings.sandbox_idle_seconds  # type: ignore[union-attr]
-    stale = [key for key, item in pool._entries.items() if item.last_touch < cutoff]
-    for key in stale:
-        victim = pool._entries.pop(key)
-        await pool._kill_entry(victim)
+    await pool._sweep_once()
     assert entry.sandbox.killed and session not in pool._entries
-    assert session2 in pool._entries and not recent.sandbox.killed
+    assert session2 in pool._entries and not recent_sandbox.killed
+    assert not recent_sandbox.paused
 
 
 async def test_aclose_kills_everything() -> None:
@@ -172,13 +183,33 @@ async def test_release_keeps_warm_when_pause_unsupported(
     pool._entries[session] = entry
 
     await pool.release(session)
+    entry.last_touch = time.monotonic() - pool.settings.sandbox_pause_seconds - 1  # type: ignore[union-attr]
+    await pool._sweep_once()
     assert entry.paused is False  # 没真挂起就不能装作挂起了
+    assert entry.pause_broken is True  # 失败过就不再每轮重试
 
     async def fake_connect(_settings: Any, _sandbox_id: str) -> Any:
         raise AssertionError("保活中的沙箱不该走重连分支")
 
     monkeypatch.setattr(sp_mod, "connect_sandbox", fake_connect)
     assert await pool.acquire(session, "run-5") is sandbox
+
+
+async def test_pause_timeout_reconnects_next_run(
+    pool: SandboxPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """pause 超时后远端状态不明：标记为已挂起，下一轮走重连确认，别拿旧句柄直接跑工具。"""
+    monkeypatch.setattr(sp_mod, "PAUSE_TIMEOUT_SECONDS", 0.01)
+    sandbox = _SlowPauseSandbox("sbx-slow")
+    session = uuid4()
+    entry = _Entry(sandbox=sandbox, sandbox_id="sbx-slow")
+    entry.last_touch = time.monotonic() - pool.settings.sandbox_pause_seconds - 1  # type: ignore[union-attr]
+    pool._entries[session] = entry
+
+    await pool._sweep_once()
+    assert entry.paused is True
+    assert entry.pause_broken is True
+    assert sandbox.paused is False  # 假沙箱的 pause 还没跑完就被取消了
 
 
 async def test_release_without_pause_api_keeps_warm(pool: SandboxPool) -> None:
@@ -189,7 +220,10 @@ async def test_release_without_pause_api_keeps_warm(pool: SandboxPool) -> None:
     entry = _Entry(sandbox=NoPause(), sandbox_id="bare")  # type: ignore[arg-type]
     pool._entries[session] = entry
     await pool.release(session)
+    entry.last_touch = time.monotonic() - pool.settings.sandbox_pause_seconds - 1  # type: ignore[union-attr]
+    await pool._sweep_once()
     assert entry.paused is False  # 没有 beta_pause：保活，靠空闲时钟回收
+    assert entry.pause_broken is True
 
 
 async def test_warm_acquire_renews_upstream_ttl(pool: SandboxPool) -> None:
@@ -240,6 +274,10 @@ async def test_sandbox_pointer_is_reused_across_workers(monkeypatch: pytest.Monk
     session = uuid4()
     assert await worker_a.acquire(session, "run-a") is shared
     await worker_a.release(session)
+    assert not shared.paused  # release 只归还使用权
+
+    worker_a._entries[session].last_touch = time.monotonic() - settings.sandbox_pause_seconds - 1
+    await worker_a._sweep_once()
     assert shared.paused
 
     assert await worker_b.acquire(session, "run-b") is resumed
@@ -254,6 +292,38 @@ async def test_sandbox_pointer_is_reused_across_workers(monkeypatch: pytest.Monk
     await worker_b.discard(session)
     assert resumed.killed
     assert await client.get(f"pigeon:sandbox:{session}") is None
+
+    await worker_a.aclose()
+    await worker_b.aclose()
+
+
+async def test_acquire_waits_for_other_worker_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """别的 worker 正在挂起时，新一轮先等挂起窗口落定再 connect，别接管到半暂停的容器。"""
+    client = FakeAsyncRedis()
+    worker_a = SandboxPool(_settings(), redis_client=client)  # type: ignore[arg-type]
+    worker_b = SandboxPool(_settings(), redis_client=client)  # type: ignore[arg-type]
+    session = uuid4()
+    await client.set(
+        f"pigeon:sandbox:{session}",
+        json.dumps(
+            {
+                "sandbox_id": "sbx-pausing",
+                "paused": False,
+                "in_use": False,
+                "worker_id": worker_a.worker_id,
+                "pausing_until": time.time() + 60,
+            }
+        ),
+    )
+    revived = _FakeSandbox("sbx-pausing")
+    monkeypatch.setattr(
+        sp_mod, "connect_sandbox", _fake_connect_returning(revived, expected="sbx-pausing")
+    )
+    monkeypatch.setattr(sp_mod, "PAUSE_WAIT_SECONDS", 0.05)
+
+    started = time.monotonic()
+    assert await worker_b.acquire(session, "run-b") is revived
+    assert time.monotonic() - started >= 0.04
 
     await worker_a.aclose()
     await worker_b.aclose()

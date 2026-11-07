@@ -297,17 +297,19 @@ async def _shutdown_workspace(
     """收尾两件事：工作区清退、沙箱按回收策略 pause/kill；产物由 publish_file 负责。"""
     if workspace is None:
         return
+    started_at = time.perf_counter()
     with contextlib.suppress(Exception):
         await workspace.cleanup()
     if pool is not None:
         try:
             if final_status in (RunStatus.INTERRUPTED, RunStatus.COMPLETED):
-                # 正常结束和等待 resume 都挂起保活：同一会话的下一轮直接复用
+                # 正常结束和等待 resume 只归还使用权；挂起由空闲巡检异步做
                 await pool.release(session_id)
             else:
                 await pool.discard(session_id)
         except Exception:
             logger.exception("Sandbox shutdown failed for run %s", run_id)
+    logger.info("Run %s workspace released in %.2fs", run_id, time.perf_counter() - started_at)
 
 
 async def _renew_lease_loop(

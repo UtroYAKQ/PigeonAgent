@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 # 共享指针读写不能无限等：Redis 黑洞时让工具调用尽快失败/降级
 REMOTE_TIMEOUT_SECONDS = 2.0
+# 挂起是网络调用，放在后台巡检里做；超时后不再重试，保活到空闲回收
+PAUSE_TIMEOUT_SECONDS = 15.0
+PAUSE_WAIT_SECONDS = PAUSE_TIMEOUT_SECONDS + 5.0
 
 
 @dataclass
@@ -42,6 +45,10 @@ class _Entry:
     run_id: str | None = None
     # 正在被 run 使用时巡检不能回收
     in_use: bool = False
+    # pause 失败过就别每轮再试：保活由空闲回收兜底
+    pause_broken: bool = False
+    # 跨 worker 的「正在挂起」窗口，epoch 秒；过期自动失效，进程崩了也不会永久挡住复用
+    pausing_until: float = 0.0
 
 
 @dataclass
@@ -52,6 +59,7 @@ class _RemoteEntry:
     paused: bool = False
     in_use: bool = False
     worker_id: str = ""
+    pausing_until: float = 0.0
 
 
 class SandboxPool:
@@ -115,6 +123,10 @@ class SandboxPool:
         async with self._lock_for(session_id):
             entry = self._entries.get(session_id)
             remote = await self._remote_get_safe(session_id)
+            if remote is not None and remote.pausing_until > time.time():
+                # 另一个 worker 正在挂起：等它落定再决定 connect 还是新建，别把容器暂停在半路
+                await self._wait_for_pause(session_id)
+                remote = await self._remote_get_safe(session_id)
             if entry is not None and remote is not None and self._remote_owned_by_other(remote):
                 # 本地引用已过时：另一个 worker 接管了同一会话的沙箱，不能 kill 它
                 logger.info(
@@ -224,7 +236,7 @@ class SandboxPool:
             entry.last_touch = time.monotonic()
 
     async def release(self, session_id: UUID) -> None:
-        """本轮结束/等待 resume：能挂起就挂起，挂不起就原地保活，空闲超时后由 sweeper 回收。"""
+        """run 结束只归还使用权；挂起交给空闲巡检，别让 pause 的网络耗时卡住收尾。"""
         async with self._lock_for(session_id):
             entry = self._entries.get(session_id)
             if entry is None:
@@ -235,20 +247,8 @@ class SandboxPool:
                 if remote.sandbox_id != entry.sandbox_id:
                     await self._kill_entry(entry)
                 return
-            paused = False
-            pause = getattr(entry.sandbox, "beta_pause", None)
-            if callable(pause):
-                try:
-                    await pause()
-                    paused = True
-                except Exception:
-                    # 阿里云 e2b 网关明确不支持 pause（pauseSession is not enabled）；
-                    # 这时不能假装它挂起了，否则下一轮会走「重连已暂停容器」的分支
-                    logger.info(
-                        "Sandbox %s does not support pause; keeping it warm", entry.sandbox_id
-                    )
-            entry.paused = paused
             entry.in_use = False
+            entry.run_id = None
             # 从本轮结束开始重新计算空闲时间，复用窗口给满
             entry.last_touch = time.monotonic()
             await self._remote_save(session_id, entry)
@@ -287,6 +287,45 @@ class SandboxPool:
         except Exception:
             logger.info("Failed to kill sandbox %s", entry.sandbox_id, exc_info=True)
 
+    async def _wait_for_pause(self, session_id: UUID) -> None:
+        """等另一个 worker 的挂起窗口结束；标记带过期时间，崩掉的 worker 不会永久挡住复用。"""
+        deadline = time.monotonic() + PAUSE_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            remote = await self._remote_get_safe(session_id)
+            if remote is None or remote.pausing_until <= time.time():
+                return
+            await asyncio.sleep(0.2)
+
+    async def _pause_entry(self, session_id: UUID, entry: _Entry) -> None:
+        """后台巡检挂起：成功才标记 paused；失败/超时就保活，后续不再重试。"""
+        if entry.paused or entry.pause_broken:
+            return
+        pause = getattr(entry.sandbox, "beta_pause", None)
+        if not callable(pause):
+            entry.pause_broken = True
+            return
+        entry.pausing_until = time.time() + PAUSE_WAIT_SECONDS
+        await self._remote_save(session_id, entry)
+        started = time.monotonic()
+        try:
+            async with asyncio.timeout(PAUSE_TIMEOUT_SECONDS):
+                await pause()
+            entry.paused = True
+            logger.info("Sandbox %s paused in %.2fs", entry.sandbox_id, time.monotonic() - started)
+        except TimeoutError:
+            # 超时后远端状态不明：按已挂起处理，下一轮重连确认，别让工具直连到半暂停的容器
+            entry.paused = True
+            entry.pause_broken = True
+            logger.warning("Sandbox %s pause timed out; will reconnect next run", entry.sandbox_id)
+        except Exception:
+            # 阿里云 e2b 网关明确不支持 pause（pauseSession is not enabled）；
+            # 不能假装它挂起了，否则下一轮会走「重连已暂停容器」的分支
+            entry.pause_broken = True
+            logger.info("Sandbox %s does not support pause; keeping it warm", entry.sandbox_id)
+        finally:
+            entry.pausing_until = 0.0
+            await self._remote_save(session_id, entry)
+
     async def _sweep_loop(self) -> None:
         while True:
             # configure() 更新空闲秒数后，巡检频率下一轮就跟上
@@ -297,7 +336,9 @@ class SandboxPool:
                 logger.exception("Sandbox sweep failed; will retry next interval")
 
     async def _sweep_once(self) -> None:
-        cutoff = time.monotonic() - self.settings.sandbox_idle_seconds
+        now = time.monotonic()
+        kill_cutoff = now - self.settings.sandbox_idle_seconds
+        pause_cutoff = now - self.settings.sandbox_pause_seconds
         for session_id, entry in list(self._entries.items()):
             if entry.in_use:
                 async with self._lock_for(session_id):
@@ -318,7 +359,7 @@ class SandboxPool:
                     # 使用中持续续期，避免上游 TTL 或共享指针先到期
                     await self._remote_save(session_id, current)
                 continue
-            if entry.last_touch >= cutoff:
+            if entry.last_touch >= max(pause_cutoff, kill_cutoff):
                 continue
             # 同样要在会话锁里做：巡检和新一轮 acquire 撞上是常态
             async with self._lock_for(session_id):
@@ -343,6 +384,11 @@ class SandboxPool:
                     self._entries.pop(session_id, None)
                     if remote.sandbox_id != current.sandbox_id:
                         await self._kill_entry(current)
+                    continue
+                if current.last_touch >= kill_cutoff:
+                    # 还没到回收线：先挂起省资源；挂不起就保持 warm
+                    if not current.paused:
+                        await self._pause_entry(session_id, current)
                     continue
                 self._entries.pop(session_id, None)
                 logger.info("Sandbox %s idle timeout; killing", current.sandbox_id)
@@ -386,6 +432,7 @@ class SandboxPool:
                 paused=bool(data.get("paused", False)),
                 in_use=bool(data.get("in_use", False)),
                 worker_id=str(data.get("worker_id") or ""),
+                pausing_until=float(data.get("pausing_until") or 0.0),
             )
         except (TypeError, ValueError):
             logger.warning("Ignoring malformed sandbox registry entry for session %s", session_id)
@@ -400,6 +447,7 @@ class SandboxPool:
                 "paused": entry.paused,
                 "in_use": entry.in_use,
                 "worker_id": self.worker_id,
+                "pausing_until": entry.pausing_until,
             }
         )
         try:

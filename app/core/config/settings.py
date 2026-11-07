@@ -117,6 +117,8 @@ class Settings(BaseSettings):
     sandbox_template: str = "code-interpreter-v1"
     # 无动静的沙箱等这么久就回收；中断等待期间同一个钟
     sandbox_idle_seconds: int = Field(default=600, ge=60)
+    # 最后一轮结束后空闲多久挂起；0 表示下一次巡检就挂起（巡检间隔最长 30s）
+    sandbox_pause_seconds: int = Field(default=30, ge=0)
     # 本地模式的工作区根目录；空着用系统临时目录
     workspace_root: str | None = None
 
