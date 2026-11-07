@@ -21,7 +21,7 @@ from pydantic_ai.messages import (
 )
 
 from app.codec.content import content_to_json, has_failure_report, to_json_value
-from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
+from app.domain.media.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
 from app.domain.run_items import (
     ImageItem,
     ResourceItem,

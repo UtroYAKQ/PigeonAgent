@@ -12,12 +12,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
-from app.domain.media_type import effective_media_type
-from app.infra.file_records import is_owner_visible
-from app.infra.storage import safe_name
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
-from app.models.upload_session import UploadSession
+from app.domain.media.media_type import effective_media_type
+from app.infra.files.records import is_owner_visible
+from app.infra.files.storage import safe_name
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
+from app.models.files.upload import UploadSession
 from app.schemas.file import FileRead
 
 

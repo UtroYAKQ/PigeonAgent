@@ -10,7 +10,7 @@ from redis.asyncio import Redis
 from app.core.exceptions import ConflictError, NotFoundError
 from app.render.producer import RenderProducer
 from app.render.queue import MAX_BACKLOG, RenderCursorInvalid, RenderQueue, RenderStream
-from app.render.redis_queue import RedisRenderQueue
+from app.render.queue.redis import RedisRenderQueue
 
 if TYPE_CHECKING:
     from app.render.consumer import RenderConsumer

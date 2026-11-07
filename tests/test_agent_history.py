@@ -16,8 +16,8 @@ from pydantic_ai.models.test import TestModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import codec
-from app.agents.base import BaseAgent
-from app.agents.store import SessionStore
+from app.agents.runtime.base import BaseAgent
+from app.agents.runtime.store import SessionStore
 from app.core.exceptions import ConfigurationError
 from app.db.types import dump_message, load_message
 from app.domain.run_items import (
@@ -28,8 +28,8 @@ from app.domain.run_items import (
     ToolResultItem,
 )
 from app.enums import RunStatus
-from app.models.session import ChatSession
-from app.models.session_run import SessionRun
+from app.models.chat.run import SessionRun
+from app.models.chat.session import ChatSession
 from app.services import run as run_service
 from tests.helpers import (
     append_run,

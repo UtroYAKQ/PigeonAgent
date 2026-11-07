@@ -9,10 +9,11 @@ from fastapi.responses import RedirectResponse
 from app.api.deps import CurrentUserDep, SessionDep, SettingsDep
 from app.core.config import Settings
 from app.core.exceptions import ConfigurationError, ForbiddenError, UnprocessableError
-from app.domain.media_type import effective_media_type
-from app.infra.storage import ObjectStorage, get_storage
+from app.domain.media.media_type import effective_media_type
+from app.infra.files.storage import ObjectStorage, get_storage
 from app.schemas.file import FileLinkOut, FilePrepare, FilePrepareOut, FileRead
-from app.services import file_link, file_service
+from app.services import file_service
+from app.services.file_service import link as file_link
 
 router = APIRouter(prefix="/files", tags=["files"])
 

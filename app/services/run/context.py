@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import codec
 from app.domain.run_items import CompactionItem, ImageItem, RunItem, ToolResultItem, VideoItem
-from app.models.session import ChatSession
-from app.models.session_run import SessionRun
+from app.models.chat.run import SessionRun
+from app.models.chat.session import ChatSession
 from app.services import file_service
 from app.services.run.pending import pending_batches_from_path
 from app.services.run.tree import load_by_ids, path_ids

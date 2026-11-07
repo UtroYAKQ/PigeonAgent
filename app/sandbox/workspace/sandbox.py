@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.core.config import Settings
-from app.infra.storage import ObjectStorage
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
+from app.infra.files.storage import ObjectStorage
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
 from app.sandbox.workspace.base import RunWorkspace
 from app.sandbox.workspace.common import (
     _DEFAULT_FILES_DIR,

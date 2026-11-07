@@ -8,9 +8,9 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from app.core.ids import parse_uuid
-from app.infra.file_records import resolve_owned_files
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
+from app.infra.files.records import resolve_owned_files
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

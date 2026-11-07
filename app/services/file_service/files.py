@@ -8,9 +8,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infra.file_records import owner_filter
-from app.infra.storage import ObjectStorage
-from app.models.file_record import FileRecord
+from app.infra.files.records import owner_filter
+from app.infra.files.storage import ObjectStorage
+from app.models.files.record import FileRecord
 from app.schemas.file import FileRead
 from app.services.file_service.content import presigned_for
 from app.services.file_service.records import _blobs_of, _owned_file, _read_of, _touch_blob

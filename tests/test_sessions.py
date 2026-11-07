@@ -6,9 +6,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums import RunStatus
-from app.models.llm_model import LlmModel
-from app.models.session import ChatSession
-from app.models.session_run import SessionRun
+from app.models.ai.llm import LlmModel
+from app.models.chat.run import SessionRun
+from app.models.chat.session import ChatSession
 from app.services import run as run_store
 from tests.helpers import append_user_run
 

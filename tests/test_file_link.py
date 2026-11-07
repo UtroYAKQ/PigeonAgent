@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from app.services import file_link
+from app.services.file_service import link as file_link
 
 SECRET = "unit-test-secret"
 

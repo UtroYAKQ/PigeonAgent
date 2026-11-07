@@ -1,6 +1,6 @@
 """媒体类型判定：扩展名优先，魔数兜底。"""
 
-from app.domain.media_type import detect_media_type, effective_media_type, extension_for
+from app.domain.media.media_type import detect_media_type, effective_media_type, extension_for
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"pixels"
 GIF = b"GIF89a" + b"pixels"

@@ -1,3 +1,3 @@
-from app.agents.base import BaseAgent
+from app.agents.runtime.base import BaseAgent
 
 __all__ = ["BaseAgent"]

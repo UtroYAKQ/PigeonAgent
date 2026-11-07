@@ -8,9 +8,9 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import BaseAgent
+from app.agents.runtime.base import BaseAgent
 from app.domain.run_items import TokenUsage
-from app.models.session import ChatSession
+from app.models.chat.session import ChatSession
 from tests.helpers import all_runs
 
 

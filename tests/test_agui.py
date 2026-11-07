@@ -39,7 +39,7 @@ from pydantic_ai.models.function import (
 from pydantic_ai.models.test import TestModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import BaseAgent
+from app.agents.runtime.base import BaseAgent
 from app.agents.tools import frontend_toolset
 from app.domain.run_items import (
     ApprovalRequestItem,
@@ -50,10 +50,10 @@ from app.domain.run_items import (
     ToolCallItem,
     ToolResultItem,
 )
+from app.schemas.chat.session import SessionCreate
 from app.schemas.run import FrontendTool
-from app.schemas.session import SessionCreate
-from app.services import chat_session as session_service
 from app.services import run as run_service
+from app.services.chat import session as session_service
 from tests.conftest import TEST_USER_ID
 from tests.helpers import all_runs, path, texts_of
 

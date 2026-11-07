@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.exceptions import UnprocessableError
-from app.infra.image_presets import resolve_base_url
+from app.infra.providers.presets import resolve_base_url
 
 
 def test_openai_uses_its_own_base_url() -> None:

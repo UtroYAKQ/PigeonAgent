@@ -15,9 +15,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
-from app.models.upload_session import UploadSession
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
+from app.models.files.upload import UploadSession
 
 logger = logging.getLogger(__name__)
 

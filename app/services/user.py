@@ -27,12 +27,12 @@ from app.core.exceptions import (
     UnprocessableError,
 )
 from app.core.ids import parse_uuid
-from app.domain.media_type import effective_media_type
+from app.domain.media.media_type import effective_media_type
 from app.domain.time import ensure_utc
 from app.infra import mailer
-from app.models.file_record import FileRecord
-from app.models.user import User
-from app.models.user_email_code import REGISTER, EmailCode
+from app.models.account.email_code import REGISTER, EmailCode
+from app.models.account.user import User
+from app.models.files.record import FileRecord
 from app.schemas.user import (
     LoginIn,
     RegisterIn,

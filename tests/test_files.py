@@ -13,12 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.infra.storage import PutResult, get_storage, upload_key
+from app.infra.files.storage import PutResult, get_storage, upload_key
 from app.main import app
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
-from app.models.upload_session import UploadSession
-from app.services import file_link
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
+from app.models.files.upload import UploadSession
+from app.services.file_service import link as file_link
 from app.tasks.blob_gc import sweep
 from tests.conftest import TEST_SECRET_KEY
 

@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.run_items import TokenUsage
-from app.models.chat_request_log import ChatRequestLog
+from app.models.chat.log import ChatRequestLog
 from tests.conftest import TEST_USER_ID
 
 

@@ -14,15 +14,15 @@ from ag_ui.core import RunErrorEvent
 from pydantic_ai import CancellationToken, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
 
-from app.agents.base import BaseAgent
-from app.agents.errors import summarize_error
+from app.agents.protocol.errors import summarize_error
+from app.agents.runtime.base import BaseAgent
 from app.agents.tools.bundle import build_tool_bundle
 from app.core.config import Settings, get_settings
 from app.core.exceptions import NotFoundError, StorageUnavailableError, UnprocessableError
 from app.db.session import SessionFactory
 from app.enums import RunStatus
-from app.infra.model_factory import ResolvedModel
-from app.infra.storage import ObjectStorage, get_storage
+from app.infra.files.storage import ObjectStorage, get_storage
+from app.infra.providers.llm import ResolvedModel
 from app.render.producer import RenderProducer
 from app.sandbox.pool import SandboxPool
 from app.sandbox.workspace import (
@@ -31,8 +31,10 @@ from app.sandbox.workspace import (
     SandboxWorkspace,
     can_use_sandbox,
 )
-from app.services import billing, chat_log, credit_guard
-from app.services import image_model as image_model_service
+from app.services.billing import credit_guard
+from app.services.billing import service as billing
+from app.services.chat import log as chat_log
+from app.services.model import image as image_model_service
 from app.services.run.lease import RUN_LEASE_SECONDS, finish_run, renew_run_lease
 from app.services.run.options import _settings_with_thinking
 from app.services.run.registry import RunRegistry

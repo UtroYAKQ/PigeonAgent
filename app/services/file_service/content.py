@@ -19,12 +19,12 @@ from app.core.exceptions import (
     UnprocessableError,
 )
 from app.core.ids import parse_uuid
-from app.domain.media_type import effective_media_type
+from app.domain.media.media_type import effective_media_type
 from app.domain.run_items import ImageItem, ResourceItem, RunItem, VideoItem
-from app.infra.file_records import resolve_files, resolve_owned_files
-from app.infra.storage import ObjectStorage, get_storage
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
+from app.infra.files.records import resolve_files, resolve_owned_files
+from app.infra.files.storage import ObjectStorage, get_storage
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
 from app.schemas.run import Attachment, ResourceRef
 from app.services.file_service.records import _blobs_of, _owned_file
 

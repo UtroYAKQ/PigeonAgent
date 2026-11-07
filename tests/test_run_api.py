@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import BaseAgent
+from app.agents.runtime.base import BaseAgent
 from app.enums import RunStatus
 from app.services import run as run_service_data
 from tests.helpers import make_session, reserve_lease

@@ -12,7 +12,7 @@ from pydantic_ai import Tool
 
 from app.core.config import Settings
 from app.core.exceptions import describe_error
-from app.core.redaction import redact_text
+from app.core.security.redaction import redact_text
 
 logger = logging.getLogger(__name__)
 

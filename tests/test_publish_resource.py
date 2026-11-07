@@ -8,8 +8,8 @@ from typing import Any
 from pydantic_ai.messages import FunctionToolResultEvent, ToolReturnPart
 
 from app import codec
-from app.agents.events import ArtifactEvent, ArtifactMedia
-from app.agents.turn import AgentTurn
+from app.agents.protocol.events import ArtifactEvent, ArtifactMedia
+from app.agents.runtime.turn import AgentTurn
 from app.domain.run_items import ResourceItem, ToolResultItem
 
 

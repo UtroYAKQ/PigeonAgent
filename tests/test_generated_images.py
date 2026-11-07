@@ -8,9 +8,9 @@ from uuid import uuid4
 
 import pytest
 
-from app.agents.events import ArtifactMedia, ImageGeneratedEvent
+from app.agents.protocol.events import ArtifactMedia, ImageGeneratedEvent
+from app.agents.runtime.turn import AgentTurn
 from app.agents.tools import image as image_tool
-from app.agents.turn import AgentTurn
 from app.domain.run_items import ImageItem, RunItem
 
 

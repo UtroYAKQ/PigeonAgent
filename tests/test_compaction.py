@@ -10,7 +10,7 @@ from pydantic_ai.models.test import TestModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import codec
-from app.agents.base import BaseAgent
+from app.agents.runtime.base import BaseAgent
 from app.domain.run_items import CompactionItem, TextItem
 from app.schemas.run import SessionRunRead
 from app.services import run as run_service

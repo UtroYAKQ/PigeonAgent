@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.v1.endpoints.auth import LOGIN_LIMIT, REGISTER_LIMIT
 from app.core import security
 from app.core.config import Settings, get_settings
-from app.models.file_record import FileRecord
-from app.models.user import User
-from app.models.user_email_code import EmailCode
+from app.models.account.email_code import EmailCode
+from app.models.account.user import User
+from app.models.files.record import FileRecord
 from tests.conftest import TEST_SECRET_KEY
 
 REG = {"email": "user@example.com", "password": "hunter2secret"}

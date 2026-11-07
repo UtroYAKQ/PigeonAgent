@@ -14,8 +14,8 @@ from app.domain.run_items import (
     PendingInterrupt,
     ToolResultItem,
 )
-from app.models.session import ChatSession
-from app.models.session_run import SessionRun
+from app.models.chat.run import SessionRun
+from app.models.chat.session import ChatSession
 from app.services.run.tree import load_by_ids, path_ids
 from app.services.run.types import PendingBatch
 

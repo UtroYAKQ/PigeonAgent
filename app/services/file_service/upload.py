@@ -10,13 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
 from app.core.exceptions import GoneError, UnprocessableError
-from app.domain.media_type import effective_media_type
+from app.domain.media.media_type import effective_media_type
 from app.domain.time import ensure_utc
-from app.infra.file_records import owner_filter
-from app.infra.storage import ObjectStorage, safe_name, upload_key
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
-from app.models.upload_session import UploadSession
+from app.infra.files.records import owner_filter
+from app.infra.files.storage import ObjectStorage, safe_name, upload_key
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
+from app.models.files.upload import UploadSession
 from app.schemas.file import FilePrepare, FilePrepareOut, FileRead
 from app.services.file_service.records import (
     _bind_blob,

@@ -11,12 +11,12 @@ from app.core.config import Settings
 from app.core.exceptions import ConfigurationError, UnprocessableError
 from app.core.security import encrypt_secret
 from app.enums import LlmProvider
-from app.infra.model_factory import (
+from app.infra.providers.llm import (
     ModelFactory,
     model_module_name,
     provider_module_name,
 )
-from app.models.llm_model import LlmModel
+from app.models.ai.llm import LlmModel
 
 SECRET_KEY = Fernet.generate_key().decode()
 

@@ -9,10 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.config_specs import CONFIG_SPECS
+from app.core.config.specs import CONFIG_SPECS
 from app.core.security import decrypt_secret
-from app.models.app_config import AppConfig
-from app.services import app_config as config_service
+from app.models.admin.config import AppConfig
+from app.services.admin import config as config_service
 from tests.conftest import TEST_SECRET_KEY
 
 

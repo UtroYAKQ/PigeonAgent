@@ -9,7 +9,7 @@ from uuid import UUID
 from pydantic_ai.messages import ModelMessage
 
 from app.domain.run_items import PendingInterrupts
-from app.models.session_run import SessionRun
+from app.models.chat.run import SessionRun
 
 
 @dataclass(slots=True)

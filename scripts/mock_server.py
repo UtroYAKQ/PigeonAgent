@@ -93,8 +93,8 @@ from pydantic_ai.models.function import (
     FunctionModel,
 )
 
-from app.agents.base import BaseAgent
-from app.infra.model_factory import ModelFactory, ResolvedModel
+from app.agents.runtime.base import BaseAgent
+from app.infra.providers.llm import ModelFactory, ResolvedModel
 from app.services import run as run_service
 
 
@@ -774,8 +774,8 @@ from app.core import security
 from app.db import Base
 from app.db.session import async_session_factory, engine
 from app.main import app
-from app.models.llm_model import LlmModel
-from app.models.user import User
+from app.models.account.user import User
+from app.models.ai.llm import LlmModel
 
 MOCK_MODEL_NAME = "Mock Agent"
 # mock 的默认测试账号：省掉注册 + 邮箱验证码这一步

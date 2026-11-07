@@ -15,12 +15,12 @@ from pydantic_ai.messages import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import codec
+from app.agents.runtime.turn import AgentTurn, _reported_tool_outcome
 from app.agents.tools.image import make_read_image
-from app.agents.turn import AgentTurn, _reported_tool_outcome
 from app.core.config import Settings
-from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
+from app.domain.media.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
 from app.domain.run_items import ImageItem, ToolCallItem, ToolResultItem
-from app.models.file_record import FileRecord
+from app.models.files.record import FileRecord
 from app.sandbox.workspace import LocalWorkspace
 from app.services import file_service
 from app.services import run as run_service

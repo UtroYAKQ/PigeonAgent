@@ -27,11 +27,11 @@ from app.domain.run_items import (
     ToolCallItem,
 )
 from app.enums import RunStatus
-from app.models.session import ChatSession
-from app.models.session_run import SessionRun
-from app.schemas.session import SessionCreate
-from app.services import chat_session as session_service
+from app.models.chat.run import SessionRun
+from app.models.chat.session import ChatSession
+from app.schemas.chat.session import SessionCreate
 from app.services import run as run_service
+from app.services.chat import session as session_service
 from tests.conftest import TEST_USER_ID
 
 

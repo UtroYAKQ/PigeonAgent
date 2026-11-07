@@ -8,7 +8,7 @@ from typing import Any
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
+from app.models.account.user import User
 from tests.helpers import make_session
 
 

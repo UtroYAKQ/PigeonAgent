@@ -12,14 +12,15 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, UnprocessableError
 from app.db.session import SessionFactory
 from app.domain.run_items import RunItem
-from app.infra.model_factory import ModelFactory
-from app.models.llm_model import LlmModel
+from app.infra.providers.llm import ModelFactory
+from app.models.ai.llm import LlmModel
 from app.render.hub import RenderHub
 from app.sandbox.pool import SandboxPool
 from app.schemas.run import RunCreate, RunResume
-from app.services import billing, file_service
-from app.services import chat_session as session_service
-from app.services import image_model as image_model_service
+from app.services import file_service
+from app.services.billing import service as billing
+from app.services.chat import session as session_service
+from app.services.model import image as image_model_service
 from app.services.run.execute import execute_run
 from app.services.run.options import _supported_thinking_level
 from app.services.run.pending import pending_batches

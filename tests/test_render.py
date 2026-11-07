@@ -7,7 +7,7 @@ from ag_ui.core import BaseEvent, RunFinishedEvent, RunStartedEvent, TextMessage
 
 from app.core.exceptions import ConflictError
 from app.render import RenderConsumer, RenderCursorInvalid, RenderEvent, RenderHub
-from app.render import queue as render_queue
+from app.render.queue import memory as render_queue
 
 SESSION_ID = uuid4()
 

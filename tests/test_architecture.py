@@ -5,7 +5,7 @@ from pathlib import Path
 TOOLS_DIR = Path(__file__).resolve().parents[1] / "app" / "agents" / "tools"
 # item 落库只允许走 turn；工具只能返回值或发类型化事件。
 FORBIDDEN = (
-    "app.agents.store",
+    "app.agents.runtime.store",
     "app.services.run_store",
     "SessionStore",
     "append_items",

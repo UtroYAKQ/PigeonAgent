@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.domain.file_ref import FileIdRef, FileRef
+from app.domain.media.file_ref import FileIdRef, FileRef
 from app.domain.time import now_utc
 from app.enums import ItemType
 

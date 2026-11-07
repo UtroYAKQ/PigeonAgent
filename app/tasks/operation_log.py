@@ -13,9 +13,9 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.core.operation import OperationEvent
-from app.core.redaction import redact_text
-from app.models.operation_log import OperationLog
+from app.core.observability.operation import OperationEvent
+from app.core.security.redaction import redact_text
+from app.models.admin.operation_log import OperationLog
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ class OperationLogger:
             and isinstance(body, dict)
             and "value" in body
         ):
-            from app.core.config_specs import SPEC_BY_KEY
+            from app.core.config.specs import SPEC_BY_KEY
 
             spec = SPEC_BY_KEY.get(event.path.rsplit("/", 1)[-1])
             if spec is not None and spec.is_secret:

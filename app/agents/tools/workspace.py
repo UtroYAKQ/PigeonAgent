@@ -15,10 +15,10 @@ from typing import Any
 from pydantic_ai import RunContext, Tool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.events import ArtifactEvent, ArtifactMedia
+from app.agents.protocol.events import ArtifactEvent, ArtifactMedia
 from app.core.config import Settings
 from app.core.exceptions import describe_error
-from app.domain.media_type import effective_media_type
+from app.domain.media.media_type import effective_media_type
 from app.sandbox.workspace import RunWorkspace, SandboxWorkspace, WorkspaceError
 from app.services import file_service
 

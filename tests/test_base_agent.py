@@ -14,11 +14,11 @@ from pydantic_ai.exceptions import (
 )
 from pydantic_ai.models.test import TestModel
 
-from app.agents.base import BaseAgent
-from app.agents.prompts import BASE_INSTRUCTIONS
+from app.agents.runtime.base import BaseAgent
+from app.agents.runtime.prompts import BASE_INSTRUCTIONS
+from app.agents.runtime.turn import summarize_error
 from app.agents.tools import get_current_time
 from app.agents.tools.frontend import frontend_toolset
-from app.agents.turn import summarize_error
 from app.schemas.run import FrontendTool
 
 

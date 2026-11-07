@@ -10,10 +10,10 @@ from app.core.exceptions import ForbiddenError, UnauthenticatedError
 from app.core.ids import parse_uuid
 from app.core.rate_limit import RateLimiter
 from app.db import get_db, get_session_factory
-from app.models.user import User
+from app.models.account.user import User
 from app.render import RenderHub
 from app.sandbox.pool import SandboxPool
-from app.services import app_config as config_service
+from app.services.admin import config as config_service
 from app.services.run.registry import RunRegistry
 from app.tasks.operation_log import OperationLogger
 

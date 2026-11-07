@@ -16,17 +16,18 @@ from pydantic_ai import RunContext, ToolReturn
 from pydantic_ai.messages import BinaryContent
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.agents.events import ArtifactMedia, ImageGeneratedEvent
+from app.agents.protocol.events import ArtifactMedia, ImageGeneratedEvent
 from app.core.config import Settings
 from app.core.exceptions import describe_error
 from app.core.ids import parse_uuid
-from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
-from app.domain.media_type import detect_media_type, extension_for
-from app.infra.image_factory import ImageGenerationError, create_client
-from app.infra.storage import ObjectStorage, get_storage
+from app.domain.media.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
+from app.domain.media.media_type import detect_media_type, extension_for
+from app.infra.files.storage import ObjectStorage, get_storage
+from app.infra.providers.image import ImageGenerationError, create_client
 from app.sandbox.workspace import RunWorkspace
-from app.services import billing, file_service
-from app.services import image_model as image_model_service
+from app.services import file_service
+from app.services.billing import service as billing
+from app.services.model import image as image_model_service
 
 logger = logging.getLogger(__name__)
 

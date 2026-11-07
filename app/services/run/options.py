@@ -6,7 +6,7 @@ from typing import cast
 
 from pydantic_ai import ModelSettings
 
-from app.models.llm_model import LlmModel
+from app.models.ai.llm import LlmModel
 
 
 def _supported_thinking_level(record: LlmModel, level: str | None) -> str | None:

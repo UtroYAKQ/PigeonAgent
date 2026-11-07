@@ -9,18 +9,19 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.store import SessionStore
+from app.agents.runtime.store import SessionStore
 from app.core.config import Settings
 from app.core.exceptions import AppError, CreditsExhausted, NotFoundError
 from app.domain.run_items import TokenUsage
 from app.enums import RunStatus
+from app.models.account.user import User
+from app.models.ai.image import ImageModel
+from app.models.ai.llm import LlmModel
+from app.models.chat.run import SessionRun
 from app.models.credit_ledger import CHAT, CreditLedger
-from app.models.image_model import ImageModel
-from app.models.llm_model import LlmModel
-from app.models.session_run import SessionRun
-from app.models.user import User
-from app.services import billing, credit_guard
 from app.services import run as run_store
+from app.services.billing import credit_guard
+from app.services.billing import service as billing
 from tests.conftest import TEST_SECRET_KEY, TEST_USER_ID, ensure_test_user
 from tests.helpers import make_session
 

@@ -1,7 +1,7 @@
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.image_model import ImageModel
+from app.models.ai.image import ImageModel
 
 
 async def test_capabilities_expose_only_public_image_model_fields(

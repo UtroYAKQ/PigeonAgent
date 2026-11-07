@@ -12,8 +12,8 @@ from app.core.exceptions import NotFoundError
 from app.core.ids import parse_uuid
 from app.domain.time import ensure_utc
 from app.enums import RunStatus
-from app.models.session import ChatSession
-from app.models.session_run import SessionRun
+from app.models.chat.run import SessionRun
+from app.models.chat.session import ChatSession
 
 # worker 崩了会话也不会永久卡住；正常跑着的 run 靠心跳续租
 RUN_LEASE_SECONDS = 600

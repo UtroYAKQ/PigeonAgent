@@ -13,12 +13,12 @@ from pydantic_ai.models.test import TestModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import BaseAgent
-from app.infra.model_factory import ModelFactory, ResolvedModel
-from app.models.chat_request_log import ChatRequestLog
-from app.models.llm_model import LlmModel
-from app.schemas.session import SessionCreate
-from app.services import chat_session as session_service
+from app.agents.runtime.base import BaseAgent
+from app.infra.providers.llm import ModelFactory, ResolvedModel
+from app.models.ai.llm import LlmModel
+from app.models.chat.log import ChatRequestLog
+from app.schemas.chat.session import SessionCreate
+from app.services.chat import session as session_service
 from app.services.run import execute as run_execute
 from tests.conftest import TEST_USER_ID
 

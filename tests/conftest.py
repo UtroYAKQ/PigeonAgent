@@ -33,7 +33,7 @@ from app.core.config import Settings, get_settings
 from app.core.rate_limit import RateLimiter
 from app.db import Base, enable_sqlite_pragmas, get_db, get_session_factory
 from app.main import app
-from app.models.user import User
+from app.models.account.user import User
 from app.render import RenderHub
 from app.services.run.registry import RunRegistry
 from app.tasks.operation_log import OperationLogger

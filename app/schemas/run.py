@@ -11,7 +11,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.domain.file_ref import FileIdRef
+from app.domain.media.file_ref import FileIdRef
 from app.domain.run_items import PendingInterrupt, RunItem, TokenUsage
 from app.enums import RunStatus
 

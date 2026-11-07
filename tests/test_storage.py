@@ -8,7 +8,7 @@ from botocore.exceptions import ClientError
 
 from app.core.config import Settings
 from app.core.exceptions import StorageError, StorageUnavailableError
-from app.infra.storage import PutResult, S3Storage, safe_name
+from app.infra.files.storage import PutResult, S3Storage, safe_name
 from tests.conftest import TEST_SECRET_KEY
 
 
@@ -79,7 +79,7 @@ def test_safe_name_drops_directories_and_odd_chars() -> None:
 
 
 def test_upload_key_is_prefixed_and_not_enumerable() -> None:
-    from app.infra.storage import upload_key
+    from app.infra.files.storage import upload_key
 
     first, second = upload_key("pigeon"), upload_key("pigeon")
     assert first.startswith("pigeon/tmp-uploads/") and second.startswith("pigeon/tmp-uploads/")
@@ -156,7 +156,7 @@ async def test_presign_uses_the_public_endpoint(monkeypatch: pytest.MonkeyPatch)
         clients.append(FakeClient())
         return clients[-1]
 
-    monkeypatch.setattr("app.infra.storage._build_client", fake_build)
+    monkeypatch.setattr("app.infra.files.storage._build_client", fake_build)
     storage = S3Storage(
         settings(
             s3_endpoint_url="http://rustfs:9000",

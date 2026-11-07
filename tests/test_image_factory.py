@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 import pytest
 
-from app.infra import image_factory
-from app.models.image_model import ImageModel
+from app.infra.providers import image as image_factory
+from app.models.ai.image import ImageModel
 
 
 def _record(**overrides: Any) -> ImageModel:

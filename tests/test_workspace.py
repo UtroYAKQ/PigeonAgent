@@ -14,8 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.tools.bundle import build_tool_bundle
 from app.agents.tools.workspace import workspace_tools
 from app.core.config import Settings
-from app.models.blob import Blob
-from app.models.file_record import FileRecord
+from app.models.files.blob import Blob
+from app.models.files.record import FileRecord
 from app.sandbox.workspace import (
     LocalWorkspace,
     SandboxWorkspace,

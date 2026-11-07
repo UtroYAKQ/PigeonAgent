@@ -14,11 +14,11 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from sqlalchemy import select
 
-from app.agents.prompts import BASE_INSTRUCTIONS
+from app.agents.runtime.prompts import BASE_INSTRUCTIONS
 from app.codec import token_usage
 from app.db.session import async_session_factory
-from app.infra.model_factory import ModelFactory, ResolvedModel
-from app.models.llm_model import LlmModel
+from app.infra.providers.llm import ModelFactory, ResolvedModel
+from app.models.ai.llm import LlmModel
 
 
 class CaseChecks(BaseModel):

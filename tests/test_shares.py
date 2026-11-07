@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.session_share import SessionShare
+from app.models.chat.shares import SessionShare
 
 
 async def _session_id(client: AsyncClient, title: str = "分享用会话") -> str:

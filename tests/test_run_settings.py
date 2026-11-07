@@ -1,4 +1,4 @@
-from app.models.llm_model import LlmModel
+from app.models.ai.llm import LlmModel
 from app.services.run.options import _settings_with_thinking, _supported_thinking_level
 
 

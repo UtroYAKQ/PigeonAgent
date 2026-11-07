@@ -12,15 +12,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.run_items import ErrorItem, TextItem
-from app.infra.model_factory import ModelFactory, ResolvedModel
+from app.infra.providers.llm import ModelFactory, ResolvedModel
 from app.main import app
-from app.models.llm_model import LlmModel
-from app.models.session_run import SessionRun
+from app.models.ai.llm import LlmModel
+from app.models.chat.run import SessionRun
 from app.render import RenderConsumer, RenderEvent, RenderHub
-from app.schemas.session import SessionCreate
-from app.services import chat_session as session_service
+from app.schemas.chat.session import SessionCreate
 from app.services import run as run_service
 from app.services import run as run_service_data
+from app.services.chat import session as session_service
 from app.services.run.registry import RunRegistry
 from tests.conftest import TEST_USER_ID
 

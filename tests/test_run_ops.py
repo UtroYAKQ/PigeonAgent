@@ -14,7 +14,7 @@ from pydantic_ai.messages import ModelRequest, ToolReturnPart
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import codec
-from app.agents.turn import _error_item
+from app.agents.runtime.turn import _error_item
 from app.core.exceptions import ConflictError, CreditsExhausted
 from app.domain.run_items import (
     CustomItem,

@@ -6,7 +6,7 @@ import abc
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from app.infra.storage import ObjectStorage
+from app.infra.files.storage import ObjectStorage
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

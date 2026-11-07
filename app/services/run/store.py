@@ -21,8 +21,8 @@ from app.domain.run_items import (
     ToolResultItem,
 )
 from app.enums import RunStatus
-from app.models.session import ChatSession
-from app.models.session_run import SessionRun
+from app.models.chat.run import SessionRun
+from app.models.chat.session import ChatSession
 from app.schemas.run import Attachment
 from app.services.run.lease import is_run_live, lease_expires_at
 from app.services.run.pending import (

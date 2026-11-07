@@ -5,7 +5,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.enums import LlmProvider
-from app.models.llm_model import LlmModel
+from app.models.ai.llm import LlmModel
 
 BASE_PAYLOAD: dict[str, Any] = {
     "name": "gpt-4.1",
@@ -189,8 +189,8 @@ async def test_storing_api_key_requires_secret_key(
 ) -> None:
     # 上面有同名 query 时不该把 key 加密写库；HTTP 层此场景被鉴权挡住，直接在服务层验证
     from app.core.exceptions import ConfigurationError
-    from app.schemas.llm_model import LlmModelCreate
-    from app.services import llm_model as model_service
+    from app.schemas.model.llm import LlmModelCreate
+    from app.services.model import llm as model_service
 
     with pytest.raises(ConfigurationError, match="SECRET_KEY"):
         await model_service.create_model(

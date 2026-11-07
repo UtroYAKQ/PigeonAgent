@@ -12,7 +12,7 @@ from uuid import UUID
 from pydantic_ai import CancellationToken
 
 from app.core.exceptions import NotFoundError, ServiceUnavailableError
-from app.services.run_control import RunControl
+from app.services.run.control import RunControl
 
 logger = logging.getLogger(__name__)
 
