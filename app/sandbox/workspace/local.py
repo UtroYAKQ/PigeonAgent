@@ -77,17 +77,24 @@ class LocalWorkspace(RunWorkspace):
 
         return await _materialize_load_batch(db, file_ids, owner_id, persist)
 
-    async def put_file(self, name: str, content: str) -> dict[str, Any]:
+    async def put_file(self, name: str, content: str, *, append: bool = False) -> dict[str, Any]:
         data = content.encode("utf-8")
 
         def _write() -> Path:
             target = self._safe(name)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+            if append and not target.is_file():
+                raise WorkspaceError(f"{name} 还不存在；第一次写入请用 append=false")
+            with target.open("ab" if append else "wb") as handle:
+                handle.write(data)
             return target
 
         target = await asyncio.to_thread(_write)
-        return {"saved_as": target.relative_to(self.root).as_posix(), "size": len(data)}
+        return {
+            "saved_as": target.relative_to(self.root).as_posix(),
+            "size": len(data),
+            "append": append,
+        }
 
     async def read_file(self, name: str, offset: int = 1, limit: int = 200) -> dict[str, Any]:
         target = self._safe(name)

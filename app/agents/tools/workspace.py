@@ -47,15 +47,18 @@ def workspace_tools(
             return {"loaded": [], **_fail("load_files", exc)}
         return {"loaded": entries}
 
-    async def write_file(name: str, content: str) -> dict[str, Any]:
+    async def write_file(name: str, content: str, append: bool = False) -> dict[str, Any]:
         """在工作区写一个文本文件。
 
         Args:
             name: 相对工作区根的文件名，比如 report.md。
-            content: 完整的文本内容；同名文件会被覆盖。
+            content: 本次要写入的文本。一次不要写太长（建议不超过约 200 行或 8KB），
+                长文件分段写，避免工具参数的 JSON 被截断或转义出错。
+            append: 默认 false 覆盖写入；分段写时第一段用 false，之后每段用 true 追加。
+                追加要求文件已存在；请按顺序逐段调用，不要并行 append。
         """
         try:
-            result = await workspace.put_file(name, content)
+            result = await workspace.put_file(name, content, append=append)
         except Exception as exc:
             return _fail("write_file", exc)
         return result
@@ -190,6 +193,8 @@ def workspace_instructions(
             "它会以 original_name 落进工作区，之后的 write_file / read_file 都用相对路径。"
             "工作区里的文件不会自动出现在会话里；只有调用 publish_file 才会上传成可下载的产物，"
             "所以需要交付的文件要主动发布。需要看文本内容时用 read_file 范围读取。"
+            "写长文件（超过约 200 行或 8KB）不要一次性塞进一个 write_file："
+            "先写第一段（append=false），再按顺序用 append=true 逐段追加，避免长 JSON 参数被截断。"
         )
     parts.append("回答正文不要回显 <resource/> 标签，直接说文件名即可。")
     return "".join(parts)

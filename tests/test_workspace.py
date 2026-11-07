@@ -78,6 +78,22 @@ async def test_put_file_overwrites_and_read_write_roundtrip(tmp_path: Path) -> N
     assert "error" in again
 
 
+async def test_put_file_appends_in_order(tmp_path: Path) -> None:
+    ws = _local(tmp_path)
+    await ws.put_file("report.md", "第一段\n")
+    saved = await ws.put_file("report.md", "第二段\n", append=True)
+
+    assert saved["append"] is True
+    assert saved["size"] == len("第二段\n".encode())
+    assert await ws.read_binary("report.md") == "第一段\n第二段\n".encode()
+
+
+async def test_put_file_append_requires_existing_file(tmp_path: Path) -> None:
+    ws = _local(tmp_path)
+    with pytest.raises(WorkspaceError, match="append=false"):
+        await ws.put_file("missing.md", "x", append=True)
+
+
 def test_local_workspace_rejects_traversal(tmp_path: Path) -> None:
     ws = _local(tmp_path)
     for evil in ("../文件.md", "/etc/passwd", "..\\.git"):
@@ -374,6 +390,23 @@ async def test_sandbox_workspace_write_read() -> None:
     assert await ws.read_binary("out.md") == "沙箱产物".encode()
     commands = await ws.run_command("ls", 30)
     assert commands["exit_code"] == 0
+
+
+async def test_sandbox_workspace_appends_in_order() -> None:
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-append", sandbox)
+    await ws.put_file("a.txt", "one")
+    saved = await ws.put_file("a.txt", "two", append=True)
+
+    assert saved["append"] is True
+    assert saved["size"] == 3
+    assert sandbox.files.written[f"{ws.root}/a.txt"] == b"onetwo"
+
+
+async def test_sandbox_append_requires_existing_file() -> None:
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-append-missing", _FakeSandbox())
+    with pytest.raises(WorkspaceError, match="append=false"):
+        await ws.put_file("missing.txt", "x", append=True)
 
 
 async def test_sandbox_list_files_lists_direct_children() -> None:

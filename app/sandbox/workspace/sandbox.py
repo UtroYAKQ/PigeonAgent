@@ -126,7 +126,7 @@ class SandboxWorkspace(RunWorkspace):
 
         return await _materialize_load_batch(db, file_ids, owner_id, persist)
 
-    async def put_file(self, name: str, content: str) -> dict[str, Any]:
+    async def put_file(self, name: str, content: str, *, append: bool = False) -> dict[str, Any]:
         self._mark()
         pure = _relative_clean(name)
         if pure is None:
@@ -138,8 +138,17 @@ class SandboxWorkspace(RunWorkspace):
             with contextlib.suppress(Exception):
                 await sandbox.files.make_dir(target.parent.as_posix())
         data = content.encode("utf-8")
-        await sandbox.files.write(target.as_posix(), data)
-        return {"saved_as": pure.as_posix(), "size": len(data)}
+        payload = data
+        if append:
+            try:
+                existing = bytes(await sandbox.files.read(target.as_posix(), format="bytes"))
+            except Exception as exc:
+                raise WorkspaceError(f"{name} 还不存在；第一次写入请用 append=false") from exc
+            payload = existing + data
+        await sandbox.files.write(
+            target.as_posix(), payload, request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS
+        )
+        return {"saved_as": pure.as_posix(), "size": len(data), "append": append}
 
     async def read_file(self, name: str, offset: int = 1, limit: int = 200) -> dict[str, Any]:
         self._mark()

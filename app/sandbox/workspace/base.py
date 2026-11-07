@@ -40,7 +40,9 @@ class RunWorkspace(abc.ABC):
         """file_id → 实体化记录；只允许会话主人自己的文件。"""
 
     @abc.abstractmethod
-    async def put_file(self, name: str, content: str) -> dict[str, Any]: ...
+    async def put_file(
+        self, name: str, content: str, *, append: bool = False
+    ) -> dict[str, Any]: ...
 
     @abc.abstractmethod
     async def read_file(self, name: str, offset: int = 1, limit: int = 200) -> dict[str, Any]: ...
