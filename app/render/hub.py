@@ -54,7 +54,7 @@ class RenderHub:
                 raise ConflictError(f"Run {run_id} is already streaming")
             if session_id in self._active:
                 raise ConflictError(
-                    f"Session {session_id} already has an active run",
+                    f"会话 {session_id} 还有正在运行的轮次",
                     active_run_id=self._active[session_id],
                 )
             queue = RenderQueue(run_id, max_backlog=self._max_backlog)
@@ -75,7 +75,7 @@ class RenderHub:
             await self._redis.delete(owner_key)
             current = await self._redis.get(active_key)
             raise ConflictError(
-                f"Session {session_id} already has an active run",
+                f"会话 {session_id} 还有正在运行的轮次",
                 active_run_id=_as_text(current),
             )
         redis_queue = RedisRenderQueue(

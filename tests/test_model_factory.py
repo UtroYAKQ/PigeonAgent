@@ -128,7 +128,7 @@ def test_wrong_secret_key_fails_to_decrypt() -> None:
         api_key_encrypted=encrypt_secret("sk-test", Fernet.generate_key().decode())
     )
 
-    with pytest.raises(ConfigurationError, match="decrypt"):
+    with pytest.raises(ConfigurationError, match="解密"):
         ModelFactory(make_settings()).create(record)
 
 

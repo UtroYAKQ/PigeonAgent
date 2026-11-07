@@ -119,7 +119,7 @@ class OperationLogger:
         return self._settings
 
     @property
-    def enabled(self) -> bool:
+    def is_enabled(self) -> bool:
         return self._settings.operation_log_enabled
 
     def configure(self, settings: Settings) -> None:
@@ -128,7 +128,7 @@ class OperationLogger:
             self._ensure_retention_task()
 
     def should_log(self, path: str) -> bool:
-        if not self.enabled:
+        if not self.is_enabled:
             return False
         excludes = [
             item.strip().rstrip("/")
@@ -146,7 +146,7 @@ class OperationLogger:
         self._ensure_retention_task()
 
     def submit(self, event: OperationEvent) -> None:
-        if not self.enabled:
+        if not self.is_enabled:
             return
         if event.kind == "request" and (not event.path or not self.should_log(event.path)):
             return

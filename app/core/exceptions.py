@@ -77,3 +77,11 @@ class CreditsExhausted(Exception):
     抛出方只表达「本轮该停」；错误码和用户可见文案由 `AgentTurn.summarize_error`
     统一归类，再落进 run 历史——一轮为什么结束只有一处说了算。
     """
+
+
+def describe_error(exc: BaseException, *, limit: int = 500, include_type: bool = False) -> str:
+    """异常转可读文案：优先异常说明，缺失时退回类型名，统一截断。"""
+    message = str(exc).strip()
+    if include_type and message:
+        message = f"{type(exc).__name__}: {message}"
+    return (message or type(exc).__name__)[:limit]

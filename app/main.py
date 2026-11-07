@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 from app.api.router import api_router
 from app.core.config import WEAK_ADMIN_PASSWORDS, Settings, get_settings
-from app.core.exceptions import AppError
+from app.core.exceptions import AppError, describe_error
 from app.core.rate_limit import RateLimiter
 from app.core.request_context import RequestContextMiddleware
 from app.db.session import async_session_factory, close_engine
@@ -21,8 +21,8 @@ from app.infra.storage import get_storage
 from app.render.hub import RenderHub
 from app.sandbox.pool import SandboxPool
 from app.services import app_config as config_service
-from app.services.run import RunRegistry
-from app.services.run_store import clear_expired_run_leases
+from app.services.run.lease import clear_expired_run_leases
+from app.services.run.registry import RunRegistry
 from app.services.user import ensure_admin
 from app.tasks import blob_gc
 from app.tasks.operation_log import OperationLogger
@@ -39,7 +39,7 @@ async def _check_database() -> bool:
             async with async_session_factory() as session:
                 await session.execute(text("SELECT 1"))
     except Exception as exc:
-        reason = str(exc) or type(exc).__name__
+        reason = describe_error(exc)
         logger.error(
             "\n"
             "============================================================\n"

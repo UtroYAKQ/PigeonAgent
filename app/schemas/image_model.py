@@ -58,7 +58,7 @@ class ImageModelBase(BaseModel):
     @model_validator(mode="after")
     def _default_size_is_supported(self) -> Self:
         if self.sizes and self.default_size not in self.sizes:
-            raise ValueError("default_size must be one of sizes")
+            raise ValueError("default_size 必须是 sizes 中的一个")
         return self
 
 
@@ -101,7 +101,7 @@ class ImageModelUpdate(BaseModel):
             and self.default_size is not None
             and self.default_size not in self.sizes
         ):
-            raise ValueError("default_size must be one of sizes")
+            raise ValueError("default_size 必须是 sizes 中的一个")
         return self
 
 

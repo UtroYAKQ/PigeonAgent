@@ -17,7 +17,14 @@ from app.domain.run_items import CompactionItem, RunItem, TokenUsage
 from app.enums import ItemType, RunStatus
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
-from app.services import run_store
+from app.services.run.context import build_context
+from app.services.run.store import (
+    append_items,
+    create_run,
+    record_compaction,
+    set_run_status,
+)
+from app.services.run.types import BuiltContext
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +80,7 @@ class SessionStore:
         """每次写入都单开一条数据库连接，避免和 agent 运行/外层请求共用同一事务。"""
         if self.session_factory is None:
             if self._fallback_db is None:
-                raise ConfigurationError("SessionStore needs a db or session_factory")
+                raise ConfigurationError("SessionStore 需要 db 或 session_factory")
             yield self._fallback_db
             return
         async with self.session_factory() as fresh_db:
@@ -88,7 +95,7 @@ class SessionStore:
             existing = await db.get(SessionRun, self.run_uuid)
             if existing is None:
                 chat_session = await db.get(ChatSession, self.session_id)
-                run = await run_store.create_run(
+                run = await create_run(
                     db,
                     self.session_id,
                     run_id=self.run_uuid,
@@ -104,10 +111,10 @@ class SessionStore:
         self._current_run = run
         return run
 
-    async def load_context(self, leaf_id: UUID | None = None) -> run_store.BuiltContext:
+    async def load_context(self, leaf_id: UUID | None = None) -> BuiltContext:
         await self.flush()
         async with self.db() as db:
-            return await run_store.build_context(db, self.session_id, leaf_id=leaf_id)
+            return await build_context(db, self.session_id, leaf_id=leaf_id)
 
     async def load(self) -> list[ModelMessage]:
         return (await self.load_context()).messages
@@ -146,9 +153,7 @@ class SessionStore:
             self._buffer_usage = None
             try:
                 async with self.db() as db:
-                    await run_store.append_items(
-                        db, self.session_id, self.run_uuid, items, usage=usage
-                    )
+                    await append_items(db, self.session_id, self.run_uuid, items, usage=usage)
             except Exception:
                 # 写失败把内容放回去，调用方还能在收尾时再试一次
                 self._buffer_items = [*items, *self._buffer_items]
@@ -181,11 +186,11 @@ class SessionStore:
         await self.ensure_run()
         await self.flush()
         async with self.db() as db:
-            await run_store.record_compaction(db, self.session_id, self.run_uuid, item, usage=usage)
+            await record_compaction(db, self.session_id, self.run_uuid, item, usage=usage)
         if usage is not None and usage.has_values():
             await self._notify_usage(usage)
 
     async def set_status(self, status: RunStatus) -> None:
         await self.flush()
         async with self.db() as db:
-            await run_store.set_run_status(db, self.session_id, self.run_uuid, status)
+            await set_run_status(db, self.session_id, self.run_uuid, status)

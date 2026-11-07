@@ -67,8 +67,7 @@ def _link_secret(settings: Settings) -> str:
 def _enforce_upload_limit(size: int, settings: Settings) -> None:
     """上限只在入口判一次；预检用浏览器报的 size，拿到字节后再按实际值复核。"""
     if size > settings.max_upload_bytes:
-        limit_mb = settings.max_upload_bytes // 1024 // 1024
-        raise UnprocessableError(f"文件超过 {limit_mb} MB 上限")
+        raise UnprocessableError(f"文件超过 {settings.max_upload_bytes // 1024 // 1024} MB 上限")
 
 
 @router.post("", response_model=FileRead, status_code=status.HTTP_201_CREATED)

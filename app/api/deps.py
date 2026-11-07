@@ -1,4 +1,3 @@
-import uuid
 from typing import Annotated, cast
 
 from fastapi import Depends, Request
@@ -8,13 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core import security
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ForbiddenError, UnauthenticatedError
+from app.core.ids import parse_uuid
 from app.core.rate_limit import RateLimiter
 from app.db import get_db, get_session_factory
 from app.models.user import User
 from app.render import RenderHub
 from app.sandbox.pool import SandboxPool
 from app.services import app_config as config_service
-from app.services.run import RunRegistry
+from app.services.run.registry import RunRegistry
 from app.tasks.operation_log import OperationLogger
 
 SessionDep = Annotated[AsyncSession, Depends(get_db)]
@@ -44,10 +44,10 @@ async def get_current_user(
     user_id, token_version = security.decode_token(
         credentials.credentials, security.ACCESS, secret_key=settings.secret_key
     )
-    try:
-        user = await db.get(User, uuid.UUID(user_id))
-    except ValueError as exc:
-        raise UnauthenticatedError("登录状态无效或已过期") from exc
+    parsed_id = parse_uuid(user_id)
+    if parsed_id is None:
+        raise UnauthenticatedError("登录状态无效或已过期")
+    user = await db.get(User, parsed_id)
     if user is None or not user.is_active or user.token_version != token_version:
         raise UnauthenticatedError("登录状态无效或已过期")
     request.state.operation_actor_id = user.id

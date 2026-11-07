@@ -6,9 +6,9 @@ from app.sandbox.workspace import (
     RunWorkspace,
     SandboxWorkspace,
     WorkspaceError,
+    can_use_sandbox,
     local_workspace_root,
     purge_session_workspace,
-    sandbox_enabled,
 )
 
 __all__ = [
@@ -17,7 +17,7 @@ __all__ = [
     "SandboxPool",
     "SandboxWorkspace",
     "WorkspaceError",
+    "can_use_sandbox",
     "local_workspace_root",
     "purge_session_workspace",
-    "sandbox_enabled",
 ]

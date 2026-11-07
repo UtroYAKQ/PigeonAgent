@@ -192,7 +192,7 @@ async def test_storing_api_key_requires_secret_key(
     from app.schemas.llm_model import LlmModelCreate
     from app.services import llm_model as model_service
 
-    with pytest.raises(ConfigurationError, match="SECRET_KEY is required"):
+    with pytest.raises(ConfigurationError, match="SECRET_KEY"):
         await model_service.create_model(
             db_session,
             LlmModelCreate(**BASE_PAYLOAD),

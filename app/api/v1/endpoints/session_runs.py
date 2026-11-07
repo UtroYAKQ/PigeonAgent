@@ -14,7 +14,10 @@ from app.schemas.run import (
     SessionRunRead,
 )
 from app.services import chat_session as session_service
-from app.services import run_store
+from app.services.run.context import build_context
+from app.services.run.lease import is_run_live
+from app.services.run.store import append_items
+from app.services.run.tree import branch_navs, get_run_or_404, path_runs
 
 router = APIRouter(prefix="/sessions", tags=["runs"])
 
@@ -29,10 +32,8 @@ async def list_runs(
 ) -> SessionRunList:
     """当前分支的 run（根→叶）。`before_run_id` + `limit` 沿路径向前翻页。"""
     chat_session = await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    runs, has_more = await run_store.path_runs(
-        db, session_id, before_run_id=before_run_id, limit=limit
-    )
-    branches = await run_store.branch_navs(db, session_id, runs, chat_session=chat_session)
+    runs, has_more = await path_runs(db, session_id, before_run_id=before_run_id, limit=limit)
+    branches = await branch_navs(db, session_id, runs, chat_session=chat_session)
     return SessionRunList(
         items=[
             SessionRunRead.model_validate(run).model_copy(update={"branch": branches.get(run.id)})
@@ -47,8 +48,8 @@ async def get_run(
     session_id: UUID, run_id: UUID, db: SessionDep, user: CurrentUserDep
 ) -> SessionRunRead:
     chat_session = await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    run = await run_store.get_run_or_404(db, session_id, run_id)
-    branches = await run_store.branch_navs(db, session_id, [run], chat_session=chat_session)
+    run = await get_run_or_404(db, session_id, run_id)
+    branches = await branch_navs(db, session_id, [run], chat_session=chat_session)
     return SessionRunRead.model_validate(run).model_copy(update={"branch": branches.get(run.id)})
 
 
@@ -66,17 +67,17 @@ async def append_custom_item(
 ) -> SessionRunRead:
     """手工追加只支持 UI 卡片；卡片永远不进入模型上下文。"""
     chat_session = await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    if run_store.run_is_live(chat_session):
-        raise ConflictError("Cannot append an item while a run is active")
-    await run_store.get_run_or_404(db, session_id, run_id)
+    if is_run_live(chat_session):
+        raise ConflictError("运行中的会话不能追加卡片")
+    await get_run_or_404(db, session_id, run_id)
     item = CustomItem(
         renderer=payload.renderer,
         version=payload.version,
         data=payload.data,
         key=payload.key,
     )
-    run = await run_store.append_items(db, session_id, run_id, [item])
-    branches = await run_store.branch_navs(db, session_id, [run], chat_session=chat_session)
+    run = await append_items(db, session_id, run_id, [item])
+    branches = await branch_navs(db, session_id, [run], chat_session=chat_session)
     return SessionRunRead.model_validate(run).model_copy(update={"branch": branches.get(run.id)})
 
 
@@ -84,7 +85,7 @@ async def append_custom_item(
 async def get_context(session_id: UUID, db: SessionDep, user: CurrentUserDep) -> SessionContext:
     """调试用的上下文快照：只拼标签，不下载媒体字节。"""
     await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    result = await run_store.build_context(db, session_id, with_media=False)
+    result = await build_context(db, session_id, with_media=False)
     return SessionContext(
         runs=[SessionRunRead.model_validate(run) for run in result.runs],
         messages=[dump_message(message) for message in result.messages],

@@ -105,9 +105,9 @@ async def test_upstream_error_does_not_leak_the_key(monkeypatch: pytest.MonkeyPa
 
 
 async def test_generated_image_url_rejects_private_addresses() -> None:
-    with pytest.raises(ValueError, match="non-public"):
+    with pytest.raises(ValueError, match="非公网"):
         await image_factory._validate_remote_url("http://127.0.0.1/internal.png")
-    with pytest.raises(ValueError, match="credentials"):
+    with pytest.raises(ValueError, match="凭据"):
         await image_factory._validate_remote_url("https://user:pass@example.com/image.png")
 
 
@@ -128,7 +128,7 @@ async def test_generated_image_download_is_size_limited(
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        with pytest.raises(ValueError, match="too large"):
+        with pytest.raises(ValueError, match="大小上限"):
             await image_factory._download_remote_image(client, "https://images.example/test.png")
 
 
@@ -140,7 +140,7 @@ async def test_generated_image_redirect_is_revalidated(
     async def validate(url: str) -> image_factory._RemoteTarget:
         checked.append(url)
         if "127.0.0.1" in url:
-            raise ValueError("non-public")
+            raise ValueError("非公网")
         return image_factory._RemoteTarget(url, "images.example", "images.example")
 
     monkeypatch.setattr(image_factory, "_validate_remote_url", validate)
@@ -153,7 +153,7 @@ async def test_generated_image_redirect_is_revalidated(
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        with pytest.raises(ValueError, match="non-public"):
+        with pytest.raises(ValueError, match="非公网"):
             await image_factory._download_remote_image(client, "https://images.example/test.png")
     assert checked == [
         "https://images.example/test.png",

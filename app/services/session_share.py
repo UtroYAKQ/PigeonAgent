@@ -34,7 +34,7 @@ def _token_hash(token: str) -> str:
 
 def _require_key(settings: Settings) -> str:
     if not settings.secret_key:
-        raise ConfigurationError("SECRET_KEY must be configured")
+        raise ConfigurationError("SECRET_KEY 未配置")
     return settings.secret_key
 
 

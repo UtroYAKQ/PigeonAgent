@@ -83,7 +83,7 @@ def _decode_value(spec: ConfigSpec, raw: str, secret_key: str | None) -> Any:
         if raw == "":
             return ""
         if not secret_key:
-            raise ConfigurationError("SECRET_KEY is required to decrypt configuration values")
+            raise ConfigurationError("解密配置项需要配置 SECRET_KEY")
         return decrypt_secret(raw, secret_key)
     return _coerce_value(spec, raw)
 
@@ -95,7 +95,7 @@ def _encode_value(spec: ConfigSpec, value: Any, secret_key: str | None) -> str |
     if text == "":
         return ""
     if not secret_key:
-        raise ConfigurationError("SECRET_KEY is required to store configuration secrets")
+        raise ConfigurationError("保存敏感配置需要配置 SECRET_KEY")
     return encrypt_secret(text, secret_key)
 
 
@@ -283,6 +283,6 @@ async def public_config(db: AsyncSession, base: Settings) -> PublicConfigRead:
         site_name=settings.site_name,
         site_description=settings.site_description,
         site_logo_url=settings.site_logo_url,
-        web_search_enabled=settings.web_search_enabled,
-        email_verification_enabled=settings.email_verification_enabled,
+        web_search_enabled=settings.can_use_web_search,
+        email_verification_enabled=settings.is_email_verification_enabled,
     )

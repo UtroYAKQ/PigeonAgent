@@ -263,7 +263,7 @@ async def get_session(db: AsyncSession, session_id: uuid.UUID) -> AdminSessionRe
         )
     ).first()
     if row is None:
-        raise NotFoundError(f"Session {session_id} not found")
+        raise NotFoundError(f"会话 {session_id} 不存在")
     chat_session, owner_email, owner_name, run_count_value = row
     return _to_admin_session(chat_session, owner_email, owner_name, run_count_value)
 
@@ -273,7 +273,7 @@ async def update_session_status(
 ) -> AdminSessionRead:
     chat_session = await db.get(ChatSession, session_id)
     if chat_session is None:
-        raise NotFoundError("Session not found")
+        raise NotFoundError("会话不存在")
     if status == SessionStatus.ARCHIVED and chat_session.active_run_id:
         raise UnprocessableError("运行中的会话不能归档")
     chat_session.status = status.value

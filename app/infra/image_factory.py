@@ -66,7 +66,7 @@ def _resolve_api_key(record: ImageModel, settings: Settings) -> str | None:
     if not record.api_key_encrypted:
         return None
     if settings.secret_key is None:
-        raise ConfigurationError("SECRET_KEY is required to decrypt image model API keys")
+        raise ConfigurationError("解密图片模型 API Key 需要配置 SECRET_KEY")
     return decrypt_secret(record.api_key_encrypted, settings.secret_key)
 
 
@@ -175,10 +175,10 @@ async def _download_remote_image(client: httpx.AsyncClient, url: str) -> tuple[b
         ) as response:
             if response.is_redirect:
                 if redirect_count >= MAX_IMAGE_REDIRECTS:
-                    raise ValueError("too many image redirects")
+                    raise ValueError("图片重定向次数过多")
                 location = response.headers.get("location")
                 if not location:
-                    raise ValueError("image redirect has no location")
+                    raise ValueError("图片重定向缺少 Location")
                 current = urljoin(current, location)
                 continue
 
@@ -188,32 +188,32 @@ async def _download_remote_image(client: httpx.AsyncClient, url: str) -> tuple[b
                 try:
                     declared_size = int(declared)
                 except ValueError as exc:
-                    raise ValueError("invalid image content-length") from exc
+                    raise ValueError("图片 Content-Length 无效") from exc
                 if declared_size > MAX_IMAGE_DOWNLOAD_BYTES:
-                    raise ValueError("generated image is too large")
+                    raise ValueError("生成的图片超过大小上限")
 
             body = bytearray()
             async for chunk in response.aiter_bytes():
                 if len(body) + len(chunk) > MAX_IMAGE_DOWNLOAD_BYTES:
-                    raise ValueError("generated image is too large")
+                    raise ValueError("生成的图片超过大小上限")
                 body.extend(chunk)
             media_type = response.headers.get("content-type", "")
             normalized = media_type.split(";", 1)[0].strip()
             if not normalized.startswith("image/"):
                 normalized = _sniff_media_type(bytes(body))
             return bytes(body), normalized
-    raise ValueError("too many image redirects")
+    raise ValueError("图片重定向次数过多")
 
 
 async def _validate_remote_url(url: str) -> _RemoteTarget:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"}:
-        raise ValueError("generated image URL must use HTTP or HTTPS")
+        raise ValueError("图片地址必须使用 HTTP 或 HTTPS")
     if parsed.username is not None or parsed.password is not None:
-        raise ValueError("generated image URL must not contain credentials")
+        raise ValueError("图片地址不能包含凭据")
     host = parsed.hostname
     if not host:
-        raise ValueError("generated image URL has no host")
+        raise ValueError("图片地址缺少主机名")
     ascii_host = host.encode("idna").decode("ascii")
 
     try:
@@ -225,11 +225,11 @@ async def _validate_remote_url(url: str) -> _RemoteTarget:
                 socket.getaddrinfo, ascii_host, port, type=socket.SOCK_STREAM
             )
         except socket.gaierror as exc:
-            raise ValueError("generated image host cannot be resolved") from exc
+            raise ValueError("无法解析图片地址的主机") from exc
         addresses = list({ipaddress.ip_address(item[4][0]) for item in results})
 
     if not addresses or any(not _is_public_address(address) for address in addresses):
-        raise ValueError("generated image URL resolves to a non-public address")
+        raise ValueError("图片地址解析到非公网地址")
     selected = sorted(addresses, key=lambda address: (address.version, address.packed))[0]
     pinned_host = f"[{selected.compressed}]" if selected.version == 6 else selected.compressed
     port_suffix = f":{parsed.port}" if parsed.port is not None else ""

@@ -20,8 +20,8 @@ from app.render import RenderConsumer, RenderEvent, RenderHub
 from app.schemas.session import SessionCreate
 from app.services import chat_session as session_service
 from app.services import run as run_service
-from app.services import run_store as run_service_data
-from app.services.run import RunRegistry
+from app.services import run as run_service_data
+from app.services.run.registry import RunRegistry
 from tests.conftest import TEST_USER_ID
 
 

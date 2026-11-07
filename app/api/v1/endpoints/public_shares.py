@@ -7,7 +7,7 @@ from app.api.deps import RateLimiterDep, SessionDep
 from app.schemas.run import SessionRunRead
 from app.schemas.session_share import SharedConversationRead, SharedSessionRead
 from app.services import session_share as share_service
-from app.services.run_store import path_runs
+from app.services.run import path_runs
 
 router = APIRouter(prefix="/public/shares", tags=["public"])
 

@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.domain.file_ref import parse_file_id
+from app.core.ids import parse_uuid
 from app.models.file_record import FileRecord
 
 
@@ -24,12 +24,7 @@ def owner_filter(owner_id: uuid.UUID | None) -> ColumnElement[bool]:
 
 
 def _wanted_ids(file_ids: Sequence[uuid.UUID | str]) -> list[uuid.UUID]:
-    wanted: list[uuid.UUID] = []
-    for file_id in file_ids:
-        parsed = parse_file_id(file_id)
-        if parsed is not None:
-            wanted.append(parsed)
-    return wanted
+    return [parsed for file_id in file_ids if (parsed := parse_uuid(file_id)) is not None]
 
 
 async def resolve_files(

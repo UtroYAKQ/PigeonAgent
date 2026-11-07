@@ -31,7 +31,7 @@ from app.models.session import ChatSession
 from app.models.session_run import SessionRun
 from app.schemas.session import SessionCreate
 from app.services import chat_session as session_service
-from app.services import run_store as run_service
+from app.services import run as run_service
 from tests.conftest import TEST_USER_ID
 
 

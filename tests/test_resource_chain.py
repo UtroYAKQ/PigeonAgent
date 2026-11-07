@@ -9,9 +9,10 @@ import pytest
 from pydantic_ai.messages import UserPromptPart
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.codec import item_text, messages_from_items
+from app.codec import messages_from_items
 from app.core.config import Settings
 from app.domain import run_items as run_item
+from app.domain.run_items import item_text
 from app.schemas.run import ResourceRef, RunCreate
 from app.services import file_service
 from tests.test_files import FakeStorage

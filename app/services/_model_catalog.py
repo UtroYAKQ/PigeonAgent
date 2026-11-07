@@ -52,7 +52,7 @@ def encrypt_api_key(api_key: SecretStr | None, secret_key: str | None) -> str | 
     if api_key is None:
         return None
     if secret_key is None:
-        raise ConfigurationError("SECRET_KEY is required to store API keys")
+        raise ConfigurationError("保存 API Key 需要配置 SECRET_KEY")
     return encrypt_secret(api_key.get_secret_value(), secret_key)
 
 

@@ -95,7 +95,7 @@ class ModelFactory:
     def _resolve_api_key(self, record: LlmModel) -> str | None:
         if record.api_key_encrypted:
             if self._settings.secret_key is None:
-                raise ConfigurationError("SECRET_KEY is required to decrypt model API keys")
+                raise ConfigurationError("解密模型 API Key 需要配置 SECRET_KEY")
             return decrypt_secret(record.api_key_encrypted, self._settings.secret_key)
         if record.provider in NO_API_KEY_REQUIRED:
             return None

@@ -1,6 +1,5 @@
 """指向 FileRecord 的引用类型。"""
 
-import uuid
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -12,16 +11,6 @@ FileIdRef = Annotated[
 
 # 工具结果 metadata 里携带 FileRef 的键；落库后转成 ToolResultItem.media
 TOOL_MEDIA_METADATA_KEY = "media"
-
-
-def parse_file_id(value: str | uuid.UUID) -> uuid.UUID | None:
-    """把工具/API 传来的 file_id 转成 UUID；格式不对返回 None，由调用方决定报错方式。"""
-    if isinstance(value, uuid.UUID):
-        return value
-    try:
-        return uuid.UUID(str(value).strip())
-    except ValueError:
-        return None
 
 
 class FileRef(BaseModel):

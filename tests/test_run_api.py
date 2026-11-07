@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
 from app.enums import RunStatus
-from app.services import run_store as run_service_data
+from app.services import run as run_service_data
 from tests.helpers import make_session, reserve_lease
 from tests.test_run_resume import seed_session, wait_run_finished
 
@@ -153,7 +153,7 @@ async def test_run_with_attachments(
 
     fake = FakeStorage()
     storage_override(fake)
-    monkeypatch.setattr("app.services.file_service.get_storage", lambda: fake)
+    monkeypatch.setattr("app.services.file_service.content.get_storage", lambda: fake)
     image = await client.post(
         "/api/v1/files", files={"file": ("a.png", b"\x89PNG\r\n\x1a\nplaceholder", "image/png")}
     )
@@ -208,7 +208,7 @@ async def test_run_with_uploaded_image_attachment(
 
     fake = FakeStorage()
     storage_override(fake)
-    monkeypatch.setattr("app.services.file_service.get_storage", lambda: fake)
+    monkeypatch.setattr("app.services.file_service.content.get_storage", lambda: fake)
     uploaded = await client.post(
         "/api/v1/files",
         files={"file": ("pic.png", b"\x89PNG\r\n\x1a\nreal", "image/png")},
@@ -270,7 +270,7 @@ async def test_run_can_be_attachment_only(
     fake = FakeStorage()
     storage_override(fake)
     # 上下文重建走的是模块级 get_storage()，不在 FastAPI 依赖里
-    monkeypatch.setattr("app.services.file_service.get_storage", lambda: fake)
+    monkeypatch.setattr("app.services.file_service.content.get_storage", lambda: fake)
     uploaded = await client.post(
         "/api/v1/files", files={"file": ("only.png", b"\x89PNG\r\n\x1a\nonly-image", "image/png")}
     )

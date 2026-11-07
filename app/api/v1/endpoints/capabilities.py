@@ -19,7 +19,7 @@ async def capabilities(
         image_models[0] if image_models else None,
     )
     return CapabilitiesRead(
-        web_search=settings.web_search_enabled,
+        web_search=settings.can_use_web_search,
         image_generation=bool(image_models) and settings.feature_image_generation_enabled,
         image_models=[
             ImageModelOption(

@@ -16,7 +16,8 @@ from app.schemas.session import (
     SessionUpdate,
 )
 from app.services import chat_session as session_service
-from app.services import run_store
+from app.services.run.pending import pending_batches
+from app.services.run.store import switch_leaf as switch_run_leaf
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -96,7 +97,7 @@ async def switch_leaf(
 ) -> SessionRead:
     """切换当前分支；被放弃的分支留在库里，只是不再进上下文。"""
     await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    chat_session = await run_store.switch_leaf(db, session_id, payload.leaf_run_id)
+    chat_session = await switch_run_leaf(db, session_id, payload.leaf_run_id)
     return await _read_back(db, chat_session)
 
 
@@ -106,7 +107,7 @@ async def list_pending(
 ) -> list[PendingBatchRead]:
     """当前分支上未决的中断批次；每条带它挂在哪条 run 上。"""
     await session_service.get_session_or_404(db, session_id, owner_id=user.id)
-    batches = await run_store.pending_batches(db, session_id)
+    batches = await pending_batches(db, session_id)
     return [
         PendingBatchRead(
             run_id=batch.run_id,

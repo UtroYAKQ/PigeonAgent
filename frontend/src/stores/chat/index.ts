@@ -14,54 +14,43 @@ import { requestScroll } from '@/lib/scrollIntent'
 import { applyAgUiEvent } from '@/lib/agui'
 import { StreamGoneError, streamRun } from '@/lib/sse'
 import { usePanelStore } from '@/stores/panel'
+import {
+  RUNS_PAGE_SIZE,
+  RUNS_PAGE_SIZE_COMPACT,
+  RUNS_REFRESH_PAGE_SIZE,
+  RUNS_REFRESH_PAGE_SIZE_COMPACT,
+  RUNS_SETTLE_PAGE_SIZE,
+  RUNS_SETTLE_PAGE_SIZE_COMPACT,
+  SEARCH_PAGE_SIZE,
+  SESSION_PAGE_SIZE,
+  SETTLE_FIRST_DELAY_MS,
+  SETTLE_MAX_DELAY_MS,
+  SETTLE_TIMEOUT_MS,
+  isAbort,
+  mergeSessionHead,
+  runHasResumeMarker,
+  runsPageSize,
+  sleep,
+} from '@/stores/chat/shared'
+import {
+  buildRunFlags,
+  buildRunPayload,
+  type RunPayloadContext,
+  type SendMessageInput,
+} from '@/stores/chat/payload'
+import { createSessionActions } from '@/stores/chat/sessionActions'
 import type {
   AgUiEvent,
   Capabilities,
   ChatSession,
-  DraftAttachment,
   LiveRun,
   LlmModel,
-  RunCreatePayload,
   SessionGroup,
   SessionRun,
   ThinkingLevel,
   ToolResultItem,
   UUID,
 } from '@/types/api'
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
-const SESSION_PAGE_SIZE = 50
-const SEARCH_PAGE_SIZE = 50
-// 打开会话先取最近这么多条 run 渲染历史；开轮后的刷新与超时收尾各自要的窗口不同。
-// 手机首屏少渲染一些历史，"加载更早"随时补得回来。
-const RUNS_PAGE_SIZE = 40
-const RUNS_PAGE_SIZE_COMPACT = 24
-const RUNS_REFRESH_PAGE_SIZE = 60
-const RUNS_REFRESH_PAGE_SIZE_COMPACT = 32
-const RUNS_SETTLE_PAGE_SIZE = 80
-const RUNS_SETTLE_PAGE_SIZE_COMPACT = 40
-
-function runsPageSize(full: number, compact: number): number {
-  if (typeof window === 'undefined') return full
-  return window.matchMedia('(max-width: 767px)').matches ? compact : full
-}
-// 事件流断了也要确认后端真的结束：首轮快查，之后指数退避，总时长封顶
-const SETTLE_FIRST_DELAY_MS = 180
-const SETTLE_MAX_DELAY_MS = 15_000
-const SETTLE_TIMEOUT_MS = 5 * 60_000
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError'
-}
-
-export interface SendMessageInput {
-  text: string
-  attachments?: DraftAttachment[]
-  parentRunId?: UUID | null
-  retryRunId?: UUID
-  groupId?: number | null
-}
 
 export interface SendMessageOutcome {
   sessionId: UUID
@@ -177,6 +166,15 @@ export const useChatStore = defineStore('chat', () => {
     }
     return results
   })
+  const toolNamesByCallId = computed(() => {
+    const names = new Map<string, string>()
+    for (const run of runs.value) {
+      for (const item of run.content) {
+        if (item.type === 'tool_call') names.set(item.tool_call_id, item.tool_name)
+      }
+    }
+    return names
+  })
   const hasPendingInterrupts = computed(() => {
     const results = toolResultsByCallId.value
     return runs.value.some(run =>
@@ -217,13 +215,6 @@ export const useChatStore = defineStore('chat', () => {
     resumedLiveRunId.value = null
     runs.value = []
     runsHasMore.value = false
-  }
-
-  /** 同一 run 续写过（内容里留有请求批次）就说明当前 live 流只是续写段。 */
-  function runHasResumeMarker(run: SessionRun | undefined): boolean {
-    return Boolean(
-      run?.content.some(item => item.type === 'approval_request' || item.type === 'call_request'),
-    )
   }
 
   /** 这个中断批次已经提交成功了，卡片和输入框都不该再把它算作未决。 */
@@ -289,11 +280,6 @@ export const useChatStore = defineStore('chat', () => {
     const list = await modelsApi.list()
     models.value = list.items
     modelsLoaded.value = true
-  }
-
-  function mergeSessionHead(head: ChatSession[], current: ChatSession[]): ChatSession[] {
-    const headIds = new Set(head.map(item => item.id))
-    return [...head, ...current.filter(item => !headIds.has(item.id))]
   }
 
   async function refreshSessions(): Promise<void> {
@@ -401,7 +387,7 @@ export const useChatStore = defineStore('chat', () => {
       runsHasMore.value = Boolean(list.has_more)
       loadingSession.value = false
       requestScroll()
-      if (session.has_unread) void markSessionRead(id)
+      if (session.has_unread) void sessionActions.markSessionRead(id)
 
       if (session.active_run_id) {
         const activeRun = list.items.find(item => item.id === session.active_run_id)
@@ -466,62 +452,15 @@ export const useChatStore = defineStore('chat', () => {
     if (hasPendingInterrupts.value) throw new Error('请先处理上方的确认卡片')
   }
 
-  /** 开关状态原样下发：后端默认值各不相同，省略字段可能把用户关掉的开关又打开。 */
-  function runFlags(): Pick<
-    RunCreatePayload,
-    'enable_web_search' | 'enable_image_generation' | 'image_model_id'
-  > {
+  function payloadContext(): RunPayloadContext {
     return {
-      enable_web_search: effectiveWebSearch.value,
-      enable_image_generation: effectiveImageGeneration.value,
-      image_model_id: effectiveImageGeneration.value ? currentImageModel.value?.id : null,
+      currentModelId: currentModelId.value ?? null,
+      effectiveWebSearch: effectiveWebSearch.value,
+      effectiveImageGeneration: effectiveImageGeneration.value,
+      currentImageModelId: currentImageModel.value?.id ?? null,
+      maxImageAttachments: maxImageAttachments.value,
+      maxResourceFiles: maxResourceFiles.value,
     }
-  }
-
-  function buildRunPayload(input: SendMessageInput): RunCreatePayload {
-    const flags = runFlags()
-    if (input.retryRunId) {
-      return {
-        retry_run_id: input.retryRunId,
-        model_id: currentModelId.value ?? undefined,
-        tools: FRONTEND_TOOLS,
-        ...flags,
-      }
-    }
-
-    const attachments = (input.attachments ?? [])
-      .filter(
-        item =>
-          item.status === 'ready' &&
-          item.record &&
-          (item.kind === 'image' || item.kind === 'video'),
-      )
-      .slice(0, maxImageAttachments.value)
-      .map(item => ({
-        kind: item.kind as 'image' | 'video',
-        name: item.record?.name ?? item.file.name,
-        media_type: item.record?.content_type || item.file.type || 'application/octet-stream',
-        file_id: item.record!.id,
-      }))
-
-    const resources = (input.attachments ?? [])
-      .filter(item => item.status === 'ready' && item.record && item.kind === 'resource')
-      .slice(0, maxResourceFiles.value)
-      .map(item => ({
-        file_id: item.record!.id,
-        name: item.record?.name ?? item.file.name,
-      }))
-
-    const payload: RunCreatePayload = {
-      model_id: currentModelId.value ?? undefined,
-      attachments,
-      resources,
-      tools: FRONTEND_TOOLS,
-      ...flags,
-    }
-    if (input.text.trim()) payload.input = input.text.trim()
-    if (input.parentRunId !== undefined) payload.parent_run_id = input.parentRunId
-    return payload
   }
 
   async function refreshRunsAfterStart(sessionId: UUID): Promise<void> {
@@ -576,7 +515,7 @@ export const useChatStore = defineStore('chat', () => {
         return { sessionId: session.id, joinedActiveRun: false }
     }
 
-    const payload = buildRunPayload({ ...input, text })
+    const payload = buildRunPayload({ ...input, text }, payloadContext())
     let runId: string
     try {
       runId = await runsApi.create(session.id, payload)
@@ -614,7 +553,7 @@ export const useChatStore = defineStore('chat', () => {
       retry_run_id: run.id,
       model_id: currentModelId.value ?? undefined,
       tools: FRONTEND_TOOLS,
-      ...runFlags(),
+      ...buildRunFlags(payloadContext()),
     })
     if (currentSessionId.value !== sessionId) return
     activeRunId.value = runId
@@ -659,7 +598,7 @@ export const useChatStore = defineStore('chat', () => {
       attachments,
       resources,
       tools: FRONTEND_TOOLS,
-      ...runFlags(),
+      ...buildRunFlags(payloadContext()),
     })
     if (currentSessionId.value !== sessionId) return
     editingRun.value = null
@@ -703,7 +642,9 @@ export const useChatStore = defineStore('chat', () => {
 
   function applyEvent(event: AgUiEvent): void {
     const live = liveRun.value
-    if (live) applyAgUiEvent(live, event)
+    if (live) {
+      applyAgUiEvent(live, event, toolCallId => toolNamesByCallId.value.get(toolCallId))
+    }
   }
 
   async function settleRun(sessionId: UUID, runId: string, generation: number): Promise<void> {
@@ -752,7 +693,7 @@ export const useChatStore = defineStore('chat', () => {
         cancelling.value = false
         resumingInterruptId.value = null
         if (run && session.has_unread) {
-          await markSessionRead(sessionId)
+          await sessionActions.markSessionRead(sessionId)
         }
         void refreshSessions().catch(() => undefined)
         return
@@ -836,7 +777,7 @@ export const useChatStore = defineStore('chat', () => {
         approvals: payload.approvals,
         calls: payload.calls,
         tools: FRONTEND_TOOLS,
-        ...runFlags(),
+        ...buildRunFlags(payloadContext()),
         model_id: currentModelId.value ?? undefined,
       })
       // 后端已经收下答案：卡片和输入框都不该再等工具结果回到快照里才算未决
@@ -885,106 +826,27 @@ export const useChatStore = defineStore('chat', () => {
     imageGenerationEnabled.value = true
   }
 
-  async function renameSession(session: ChatSession, title: string): Promise<void> {
-    const updated = await sessionsApi.update(session.id, {
-      title: title.trim(),
-    })
-    updateSessionInLists(updated)
-  }
-
-  async function updateSessionModel(modelId: number): Promise<void> {
-    if (busy.value) return
-    const nextModel = models.value.find(model => model.id === modelId)
-    const level =
-      currentThinkingLevel.value && nextModel?.thinking_levels.includes(currentThinkingLevel.value)
-        ? currentThinkingLevel.value
-        : null
-    if (!currentSession.value) {
-      pendingModelId.value = modelId
-      pendingThinkingLevel.value = level
-      return
-    }
-    const updated = await sessionsApi.update(currentSession.value.id, {
-      model_id: modelId,
-      thinking_level: level,
-    })
-    updateSessionInLists(updated)
-    pendingModelId.value = modelId
-    pendingThinkingLevel.value = level
-  }
-
-  async function setThinkingLevel(level: ThinkingLevel | null): Promise<void> {
-    if (level && !thinkingLevels.value.includes(level)) return
-    if (!currentSession.value) {
-      pendingThinkingLevel.value = level
-      return
-    }
-    const updated = await sessionsApi.update(currentSession.value.id, {
-      thinking_level: level,
-    })
-    updateSessionInLists(updated)
-    pendingThinkingLevel.value = level
-  }
-
-  async function markSessionRead(sessionId: UUID): Promise<void> {
-    try {
-      const updated = await sessionsApi.markRead(sessionId)
-      updateSessionInLists(updated)
-    } catch (error) {
-      // 已读是轻量状态，失败不影响对话，但侧栏的红点没清掉要能被查出来
-      console.warn('标记会话已读失败', error)
-    }
-  }
-
-  async function archiveSession(session: ChatSession): Promise<void> {
-    if (busy.value && session.id === currentSessionId.value) return
-    const updated = await sessionsApi.update(session.id, {
-      status: 'archived',
-    })
-    sessions.value = sessions.value.filter(item => item.id !== session.id)
-    archivedSessions.value = [
-      updated,
-      ...archivedSessions.value.filter(item => item.id !== session.id),
-    ]
-    if (currentSessionId.value === session.id) resetCurrent()
-  }
-
-  async function unarchiveSession(session: ChatSession): Promise<void> {
-    const updated = await sessionsApi.update(session.id, { status: 'active' })
-    archivedSessions.value = archivedSessions.value.filter(item => item.id !== session.id)
-    sessions.value = [updated, ...sessions.value.filter(item => item.id !== session.id)]
-  }
-
-  async function deleteSession(session: ChatSession): Promise<void> {
-    await sessionsApi.remove(session.id)
-    removeSessionFromLists(session.id)
-  }
-
-  async function moveSessionToGroup(session: ChatSession, groupId: number | null): Promise<void> {
-    const updated = await sessionsApi.update(session.id, { group_id: groupId })
-    updateSessionInLists(updated)
-    void refreshSessions().catch(() => undefined)
-  }
-
-  async function createGroup(name: string): Promise<SessionGroup> {
-    const group = await groupsApi.create(name)
-    groups.value = [...groups.value, group]
-    return group
-  }
-
-  async function renameGroup(group: SessionGroup, name: string): Promise<void> {
-    const updated = await groupsApi.rename(group.id, name)
-    groups.value = groups.value.map(item => (item.id === updated.id ? updated : item))
-  }
-
-  async function deleteGroup(group: SessionGroup): Promise<void> {
-    await groupsApi.remove(group.id)
-    groups.value = groups.value.filter(item => item.id !== group.id)
-    await refreshSessions()
-  }
+  const sessionActions = createSessionActions({
+    busy,
+    currentSessionId,
+    currentSession,
+    currentThinkingLevel,
+    thinkingLevels,
+    models,
+    sessions,
+    archivedSessions,
+    groups,
+    pendingModelId,
+    pendingThinkingLevel,
+    updateSessionInLists,
+    removeSessionFromLists,
+    resetCurrent,
+    refreshSessions,
+  })
 
   return {
     models,
+    ...sessionActions,
     modelsLoaded,
     groups,
     sessions,
@@ -1055,21 +917,10 @@ export const useChatStore = defineStore('chat', () => {
     editMessage,
     cancelRun,
     switchBranch,
-    renameSession,
     resumePendingBatch,
     beginEditing,
     cancelEditing,
     setWebSearchEnabled,
-    updateSessionModel,
-    setThinkingLevel,
-    markSessionRead,
-    archiveSession,
-    unarchiveSession,
-    deleteSession,
-    moveSessionToGroup,
-    createGroup,
-    renameGroup,
-    deleteGroup,
     resetCurrent,
   }
 })

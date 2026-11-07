@@ -37,53 +37,52 @@ def build_tool_bundle(
     offer_workspace_tools: bool,
 ) -> ToolBundle:
     tools: list[Tool[Any]] = []
-    workspace_ready = offer_workspace_tools and workspace is not None
-    if workspace_ready and workspace is not None:
-        tools.extend(
-            workspace_tools(workspace, session_factory, owner_id=owner_id, settings=settings)
-        )
-
-    storage = workspace.storage if workspace is not None else None
-    read_ready = (
-        (offer_workspace_tools or enable_image_generation)
-        and workspace is not None
-        and storage is not None
-        and bool(model.profile.get("supports_image_input", True))
-    )
-    if read_ready and workspace is not None and storage is not None:
-        tools.append(
-            Tool(
-                make_read_image(
-                    session_factory,
-                    owner_id=owner_id,
-                    settings=settings,
-                    storage=storage,
-                    workspace=workspace,
-                )
+    has_workspace_tools = workspace is not None and offer_workspace_tools
+    can_read_image = False
+    can_generate_image = False
+    if workspace is not None:
+        if offer_workspace_tools:
+            tools.extend(
+                workspace_tools(workspace, session_factory, owner_id=owner_id, settings=settings)
             )
-        )
-
-    generate_ready = enable_image_generation and storage is not None and image_model_id is not None
-    if generate_ready and storage is not None:
-        tools.append(
-            Tool(
-                make_generate_image(
-                    session_factory,
-                    owner_id=owner_id,
-                    settings=settings,
-                    run_id=run_id,
-                    image_model_id=image_model_id,
-                )
+        storage = workspace.storage
+        if storage is not None:
+            can_read_image = (offer_workspace_tools or enable_image_generation) and bool(
+                model.profile.get("supports_image_input", True)
             )
-        )
+            if can_read_image:
+                tools.append(
+                    Tool(
+                        make_read_image(
+                            session_factory,
+                            owner_id=owner_id,
+                            settings=settings,
+                            storage=storage,
+                            workspace=workspace,
+                        )
+                    )
+                )
+            can_generate_image = enable_image_generation and image_model_id is not None
+            if can_generate_image:
+                tools.append(
+                    Tool(
+                        make_generate_image(
+                            session_factory,
+                            owner_id=owner_id,
+                            settings=settings,
+                            run_id=run_id,
+                            image_model_id=image_model_id,
+                        )
+                    )
+                )
 
     if enable_web_search:
         tools.extend(web_search_tools(settings))
 
     instructions = (
         workspace_instructions(
-            include_workspace=workspace_ready,
-            include_read_image=read_ready,
+            include_workspace=has_workspace_tools,
+            include_read_image=can_read_image,
         )
         or None
     )

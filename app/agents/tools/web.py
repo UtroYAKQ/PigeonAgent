@@ -11,6 +11,7 @@ import httpx
 from pydantic_ai import Tool
 
 from app.core.config import Settings
+from app.core.exceptions import describe_error
 from app.core.redaction import redact_text
 
 logger = logging.getLogger(__name__)
@@ -160,11 +161,18 @@ class WebTools:
             return {"query": cleaned_query, "results": results, "total": len(results)}
         except (WebToolError, ValueError) as exc:
             logger.info("Web search failed: %s", exc)
-            return {"query": str(query)[:MAX_QUERY_CHARS], "results": [], "error": str(exc)}
+            return {
+                "query": str(query)[:MAX_QUERY_CHARS],
+                "results": [],
+                "error": describe_error(exc),
+            }
         except Exception as exc:  # 工具失败要回给模型，不要打断整轮
             logger.exception("Unexpected web search failure")
-            message = f"{type(exc).__name__}: {exc}"[:500]
-            return {"query": str(query)[:MAX_QUERY_CHARS], "results": [], "error": message}
+            return {
+                "query": str(query)[:MAX_QUERY_CHARS],
+                "results": [],
+                "error": describe_error(exc, include_type=True),
+            }
 
     async def fetch_url(self, url: str) -> dict[str, Any]:
         """抓取单个网页，返回标题和 Markdown 正文，适合读取搜索结果详情。
@@ -189,15 +197,18 @@ class WebTools:
             return {"url": cleaned_url, "title": title, "content": content}
         except WebToolError as exc:
             logger.info("Web fetch failed: %s", exc)
-            return {"url": str(url)[:MAX_URL_CHARS], "error": str(exc)}
+            return {"url": str(url)[:MAX_URL_CHARS], "error": describe_error(exc)}
         except Exception as exc:
             logger.exception("Unexpected web fetch failure")
-            return {"url": str(url)[:MAX_URL_CHARS], "error": f"{type(exc).__name__}: {exc}"[:500]}
+            return {
+                "url": str(url)[:MAX_URL_CHARS],
+                "error": describe_error(exc, include_type=True),
+            }
 
 
 def web_search_tools(settings: Settings) -> list[Tool[Any]]:
     """联网工具的下发条件与能力下发同一条规则：凭证齐且总闸开着。"""
-    if not settings.web_search_enabled:
+    if not settings.can_use_web_search:
         return []
     service = WebTools(settings)
     return [Tool(service.web_search), Tool(service.fetch_url)]

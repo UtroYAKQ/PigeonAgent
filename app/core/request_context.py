@@ -5,17 +5,15 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar, Token
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import parse_qs
 
 from starlette.datastructures import MutableHeaders
 
 from app.core.operation import OperationEvent, OperationSink
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger("app.request")
 
@@ -107,6 +105,39 @@ async def _capture_request(
     return replay, raw, len(raw), len(raw) > max_bytes
 
 
+@dataclass(slots=True)
+class _ResponseCapture:
+    """透传响应消息，同时按需收集状态码与小体积 JSON 响应体。"""
+
+    request_id: str
+    should_capture: bool
+    max_bytes: int
+    status: int = 500
+    content_type: str = ""
+    body: bytearray = field(default_factory=bytearray)
+    body_bytes: int = 0
+    truncated: bool = False
+    is_capturing: bool = False
+
+    async def send(self, send: Callable[[dict[str, Any]], Awaitable[None]], message: Any) -> None:
+        if message["type"] == "http.response.start":
+            self.status = int(message["status"])
+            headers = MutableHeaders(scope=message)
+            headers.setdefault("X-Request-ID", self.request_id)
+            headers.setdefault("X-Content-Type-Options", "nosniff")
+            self.content_type = headers.get("content-type") or ""
+            self.is_capturing = self.should_capture and _is_json(headers)
+        elif message["type"] == "http.response.body":
+            chunk = message.get("body", b"")
+            self.body_bytes += len(chunk)
+            if self.is_capturing and len(self.body) < self.max_bytes:
+                remaining = self.max_bytes - len(self.body)
+                self.body.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    self.truncated = True
+        await send(message)
+
+
 class RequestContextMiddleware:
     """纯 ASGI 中间件：采集请求/响应并异步投递操作日志。"""
 
@@ -125,19 +156,19 @@ class RequestContextMiddleware:
             getattr(app, "state", None), "operation_logger", None
         )
         path = str(scope.get("path") or "")
-        excluded = logger_ is not None and not logger_.should_log(path)
+        is_excluded = logger_ is not None and not logger_.should_log(path)
+        is_logging_active = logger_ is not None and not is_excluded and logger_.is_enabled
         started = time.perf_counter()
-        status = 500
-        response_type = ""
-        response_buffer = bytearray()
-        response_bytes = 0
-        response_truncated = False
-        capture_response = False
         max_request = logger_.settings.operation_log_max_request_body if logger_ else 0
         max_response = logger_.settings.operation_log_max_response_body if logger_ else 0
         trust_proxy = logger_.settings.operation_log_trust_proxy if logger_ else False
+        capture = _ResponseCapture(
+            request_id=request_id,
+            should_capture=is_logging_active,
+            max_bytes=max_response,
+        )
 
-        if logger_ is not None and not excluded and logger_.enabled:
+        if is_logging_active:
             receive, request_body, request_bytes, request_truncated = await _capture_request(
                 scope, receive, headers, max_request
             )
@@ -149,40 +180,18 @@ class RequestContextMiddleware:
         state = scope.setdefault("state", {})
         context_token: Token[RequestOperationContext | None] = _operation_context.set(
             RequestOperationContext(
-                logger=None if excluded else logger_,
+                logger=None if is_excluded else logger_,
                 request_id=request_id,
             )
         )
 
         async def send_with_headers(message: Any) -> None:
-            nonlocal status, response_type, response_bytes, response_truncated
-            nonlocal capture_response
-            if message["type"] == "http.response.start":
-                status = int(message["status"])
-                response_headers = MutableHeaders(scope=message)
-                response_headers.setdefault("X-Request-ID", request_id)
-                response_headers.setdefault("X-Content-Type-Options", "nosniff")
-                response_type = response_headers.get("content-type") or ""
-                capture_response = (
-                    logger_ is not None
-                    and not excluded
-                    and logger_.enabled
-                    and _is_json(response_headers)
-                )
-            elif message["type"] == "http.response.body":
-                chunk = message.get("body", b"")
-                response_bytes += len(chunk)
-                if capture_response and len(response_buffer) < max_response:
-                    remaining = max_response - len(response_buffer)
-                    response_buffer.extend(chunk[:remaining])
-                    if len(chunk) > remaining:
-                        response_truncated = True
-            await send(message)
+            await capture.send(send, message)
 
         try:
             await self.app(scope, receive, send_with_headers)
         except Exception:
-            status = 500
+            capture.status = 500
             raise
         finally:
             _operation_context.reset(context_token)
@@ -190,7 +199,7 @@ class RequestContextMiddleware:
             actor_id = state.get("operation_actor_id")
             actor_email = state.get("operation_actor_email")
             route = getattr(scope.get("route"), "path", None)
-            if logger_ is not None and not excluded:
+            if logger_ is not None and not is_excluded:
                 logger_.submit(
                     OperationEvent(
                         request_id=request_id,
@@ -204,10 +213,10 @@ class RequestContextMiddleware:
                         request_body=request_body,
                         request_bytes=request_bytes,
                         request_truncated=request_truncated,
-                        status_code=status,
-                        response_body=bytes(response_buffer) if capture_response else None,
-                        response_bytes=response_bytes,
-                        response_truncated=response_truncated,
+                        status_code=capture.status,
+                        response_body=bytes(capture.body) if capture.is_capturing else None,
+                        response_bytes=capture.body_bytes,
+                        response_truncated=capture.truncated,
                         duration_ms=elapsed_ms,
                         client_ip=_client_ip(scope, headers, trust_proxy),
                         user_agent=(headers.get("user-agent") or "")[:512] or None,
@@ -217,8 +226,8 @@ class RequestContextMiddleware:
                 "%s %s -> %s %.1fms rid=%s %s",
                 scope.get("method"),
                 path,
-                status,
+                capture.status,
                 elapsed_ms,
                 request_id,
-                response_type.split(";", 1)[0],
+                capture.content_type.split(";", 1)[0],
             )

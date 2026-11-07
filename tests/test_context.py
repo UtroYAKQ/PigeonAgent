@@ -6,7 +6,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, Tool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.run_items import ApprovalRequestItem, TextItem, ToolResultItem
-from app.services import run_store as run_service
+from app.services import run as run_service
 from tests.helpers import (
     append_run,
     assistant,

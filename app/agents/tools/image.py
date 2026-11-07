@@ -18,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.events import ArtifactMedia, ImageGeneratedEvent
 from app.core.config import Settings
-from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef, parse_file_id
+from app.core.exceptions import describe_error
+from app.core.ids import parse_uuid
+from app.domain.file_ref import TOOL_MEDIA_METADATA_KEY, FileRef
 from app.domain.media_type import detect_media_type, extension_for
 from app.infra.image_factory import ImageGenerationError, create_client
 from app.infra.storage import ObjectStorage, get_storage
@@ -71,7 +73,7 @@ def make_generate_image(
             images = await client.generate(prompt=prompt, size=chosen, count=wanted)
         except ImageGenerationError as exc:
             logger.warning("Image generation failed: %s", exc)
-            return {"error": str(exc)}
+            return {"error": describe_error(exc)}
         except Exception as exc:  # 上游五花八门的错误统一转成可读原因
             logger.exception("Image generation crashed")
             return {"error": f"生成失败：{exc.__class__.__name__}"}
@@ -172,7 +174,7 @@ def make_read_image(
         if not target:
             return _error("source 不能为空")
 
-        file_id = parse_file_id(target)
+        file_id = parse_uuid(target)
         if file_id is not None:
             try:
                 async with session_factory() as db:
@@ -181,19 +183,23 @@ def make_read_image(
                     )
             except Exception as exc:
                 logger.warning("read_image failed for %s: %s", target, exc)
-                return _error(_reason(exc))
-            return _image_result(str(file_id), name, media_type, data, settings)
+                return _error(describe_error(exc))
+            error = _type_error(media_type) or _size_error(len(data), settings)
+            if error is not None:
+                return _error(error)
+            return _image_result(str(file_id), name, media_type, data)
 
         if workspace is None:
             return _error("当前会话没有工作区，只能用 file_id 读取图片")
         try:
             data = await workspace.read_binary(target, max_bytes=settings.max_upload_bytes)
         except Exception as exc:
-            return _error(_reason(exc))
+            return _error(describe_error(exc))
 
         media_type = detect_media_type(target, data)
-        if media_type not in _READABLE_IMAGE_TYPES:
-            return _error("不是受支持的图片格式；read_image 只读 PNG/JPEG/WebP/GIF")
+        error = _type_error(media_type)
+        if error is not None:
+            return _error(error)
         name = PurePosixPath(target.replace("\\", "/")).name or "image"
         try:
             async with session_factory() as db:
@@ -202,19 +208,13 @@ def make_read_image(
                 )
         except Exception as exc:
             logger.warning("read_image upload failed for %s: %s", target, exc)
-            return _error(_reason(exc))
-        return _image_result(str(record.id), record.name, media_type, data, settings)
+            return _error(describe_error(exc))
+        return _image_result(str(record.id), record.name, media_type, data)
 
     return read_image
 
 
-def _image_result(
-    file_id: str, name: str, media_type: str, data: bytes, settings: Settings
-) -> ToolReturn:
-    if media_type not in _READABLE_IMAGE_TYPES:
-        return _error("不是受支持的图片格式；read_image 只读 PNG/JPEG/WebP/GIF")
-    if len(data) > settings.max_upload_bytes:
-        return _error(f"图片超过 {settings.max_upload_bytes // 1024 // 1024} MB 上限")
+def _image_result(file_id: str, name: str, media_type: str, data: bytes) -> ToolReturn:
     file_ref = FileRef(file_id=file_id, name=name, media_type=media_type, size=len(data))
     return ToolReturn(
         return_value=[
@@ -225,12 +225,20 @@ def _image_result(
     )
 
 
+def _type_error(media_type: str) -> str | None:
+    if media_type in _READABLE_IMAGE_TYPES:
+        return None
+    return "不是受支持的图片格式；read_image 只读 PNG/JPEG/WebP/GIF"
+
+
+def _size_error(size: int, settings: Settings) -> str | None:
+    if size <= settings.max_upload_bytes:
+        return None
+    return f"图片超过 {settings.max_upload_bytes // 1024 // 1024} MB 上限"
+
+
 def _error(message: str) -> ToolReturn:
     return ToolReturn(return_value={"error": message})
-
-
-def _reason(exc: Exception) -> str:
-    return (str(exc) or type(exc).__name__)[:500]
 
 
 _READABLE_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}

@@ -53,7 +53,7 @@ from app.domain.run_items import (
 from app.schemas.run import FrontendTool
 from app.schemas.session import SessionCreate
 from app.services import chat_session as session_service
-from app.services import run_store as run_service
+from app.services import run as run_service
 from tests.conftest import TEST_USER_ID
 from tests.helpers import all_runs, path, texts_of
 

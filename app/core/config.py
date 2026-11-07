@@ -159,11 +159,11 @@ class Settings(BaseSettings):
         return _FALLBACK_FROM
 
     @property
-    def email_verification_enabled(self) -> bool:
+    def is_email_verification_enabled(self) -> bool:
         return bool(self.smtp_host) and self.email_verification_required
 
     @property
-    def web_search_enabled(self) -> bool:
+    def can_use_web_search(self) -> bool:
         """联网搜索就绪 = 凭证齐全且平台总闸开着；能力下发一律走这里，别再各自拼。"""
         return bool(self.deepseek_api_key) and self.feature_web_search_enabled
 
@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     def _validate_cors_origins(cls, value: list[str]) -> list[str]:
         # allow_credentials=True 与通配符组合非法，必须显式列出来源
         if "*" in value:
-            raise ValueError("cors_origins cannot contain '*'; list explicit origins")
+            raise ValueError("cors_origins 不能包含 '*'；请列出明确来源")
         return value
 
 

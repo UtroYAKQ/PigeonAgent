@@ -9,7 +9,7 @@ from app.enums import RunStatus
 from app.models.llm_model import LlmModel
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
-from app.services import run_store as run_store
+from app.services import run as run_store
 from tests.helpers import append_user_run
 
 

@@ -48,6 +48,7 @@ async def finish_run_log(
     # 以 run 起点算整轮时长；resume 那次 started_at 只是续写段的起点。
     duration_ms = max(int((finished - ensure_utc(run.created_at)).total_seconds() * 1000), 0)
     log = await db.scalar(select(ChatRequestLog).where(ChatRequestLog.run_id == run_id))
+    log_error = error[:500] if error else None
     if log is None:
         log = ChatRequestLog(
             user_id=owner_id,
@@ -59,7 +60,7 @@ async def finish_run_log(
             usage=run.usage,
             credits_charged=totals.credits,
             images_generated=totals.images,
-            error=error[:500] if error else None,
+            error=log_error,
             duration_ms=duration_ms,
             finished_at=finished,
         )
@@ -74,7 +75,7 @@ async def finish_run_log(
         log.usage = run.usage
         log.credits_charged = totals.credits
         log.images_generated = totals.images
-        log.error = error[:500] if error else None
+        log.error = log_error
         log.duration_ms = duration_ms
         log.finished_at = finished
     await db.commit()

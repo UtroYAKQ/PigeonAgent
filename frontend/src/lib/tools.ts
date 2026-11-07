@@ -47,6 +47,7 @@ const TOOL_NAMES: Record<string, string> = {
   write_file: '写入文件',
   read_file: '读取文件',
   ui_open_html_preview: '准备页面预览',
+  ui_ask_user_question: '向你提问',
   generate_image: '生成图片',
   read_image: '读取图片',
 }
@@ -74,6 +75,7 @@ const TOOL_COPY: Record<string, ToolCopy> = {
   web_search: { running: '正在搜索网页', done: '搜索完成', failed: '搜索失败', paused: '搜索已暂停' },
   fetch_url: { running: '正在读取网页', done: '网页已读取', failed: '网页读取失败', paused: '网页读取已暂停' },
   ui_open_html_preview: { running: '正在生成预览', done: '预览已生成' },
+  ui_ask_user_question: { running: '正在整理问题', done: '已向你提问', paused: '提问已暂停' },
   get_current_time: { running: '正在查询当前时间', done: '已获取当前时间' },
   load_files: { running: '正在加载文件', done: '已加载文件' },
   list_files: { running: '正在浏览工作区', done: '已浏览工作区' },

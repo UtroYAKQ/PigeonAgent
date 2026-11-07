@@ -8,7 +8,7 @@ from fakeredis import FakeAsyncRedis
 from pydantic_ai import CancellationToken
 
 from app.core.exceptions import NotFoundError
-from app.services.run import RunRegistry
+from app.services.run.registry import RunRegistry
 from app.services.run_control import RunControl
 
 

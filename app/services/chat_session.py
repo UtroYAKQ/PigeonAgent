@@ -59,7 +59,7 @@ async def list_sessions(
 async def get_session_or_404(db: AsyncSession, session_id: UUID, *, owner_id: UUID) -> ChatSession:
     chat_session = await db.get(ChatSession, session_id)
     if chat_session is None or chat_session.owner_id != owner_id:
-        raise NotFoundError(f"Session {session_id} not found")
+        raise NotFoundError(f"会话 {session_id} 不存在")
     return chat_session
 
 
@@ -105,7 +105,7 @@ async def update_session(
         data["thinking_level"] = payload.thinking_level.value
     elif not explicit_level and next_model is not None and chat_session.thinking_level:
         # 换到不支持当前挡位的模型时安静回落到默认，避免历史会话把 run 卡死
-        supported = {level for level in next_model.thinking_levels}
+        supported = set(next_model.thinking_levels)
         if chat_session.thinking_level not in supported:
             data["thinking_level"] = None
     if payload.status is not None:

@@ -20,7 +20,7 @@ from app.models.llm_model import LlmModel
 from app.models.session_run import SessionRun
 from app.models.user import User
 from app.services import billing, credit_guard
-from app.services import run_store as run_store
+from app.services import run as run_store
 from tests.conftest import TEST_SECRET_KEY, TEST_USER_ID, ensure_test_user
 from tests.helpers import make_session
 

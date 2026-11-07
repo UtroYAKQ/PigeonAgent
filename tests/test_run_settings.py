@@ -1,5 +1,5 @@
 from app.models.llm_model import LlmModel
-from app.services.run import _settings_with_thinking, _supported_thinking_level
+from app.services.run.options import _settings_with_thinking, _supported_thinking_level
 
 
 def _model(levels: list[str]) -> LlmModel:

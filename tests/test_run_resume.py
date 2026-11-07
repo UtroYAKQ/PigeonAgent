@@ -19,7 +19,7 @@ from app.models.chat_request_log import ChatRequestLog
 from app.models.llm_model import LlmModel
 from app.schemas.session import SessionCreate
 from app.services import chat_session as session_service
-from app.services import run as run_service
+from app.services.run import execute as run_execute
 from tests.conftest import TEST_USER_ID
 
 DANGEROUS_TOOL = "delete_file"
@@ -198,7 +198,7 @@ async def seed_session(
         supports_tools=supports_tools,
     )
     monkeypatch.setattr(ModelFactory, "create", lambda _self, _record: resolved)
-    monkeypatch.setattr(run_service, "BaseAgent", agent_cls)
+    monkeypatch.setattr(run_execute, "BaseAgent", agent_cls)
     return created.id
 
 
@@ -318,7 +318,7 @@ async def test_resume_must_cover_every_interrupt(
         json={"interrupt_id": batch["interrupt_id"], "approvals": {approval_id: True}},
     )
     assert partial.status_code == 422
-    assert "must cover" in partial.json()["detail"]
+    assert "必须覆盖" in partial.json()["detail"]
 
     runs = await list_runs(client, session_id)
     assert all(not items_of_type(run, "tool_result") for run in runs)

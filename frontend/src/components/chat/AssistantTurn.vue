@@ -120,7 +120,7 @@ async function retry(): Promise<void> {
 
     <ArtifactSkeleton v-if="view.generatingImage" />
 
-    <TurnFiles :media="view.attachments" />
+    <TurnFiles v-if="!isStreaming" :media="view.attachments" />
 
     <FlightLoader v-if="isStreaming" class="mt-4" />
 

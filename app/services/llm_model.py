@@ -23,7 +23,7 @@ async def create_model(
     db: AsyncSession, payload: LlmModelCreate, *, secret_key: str | None
 ) -> LlmModel:
     if payload.compaction_threshold is not None and payload.context_window is None:
-        raise UnprocessableError("Compaction threshold requires context_window")
+        raise UnprocessableError("设置压缩阈值前必须先设置 context_window")
     values = payload.model_dump(exclude={"api_key"})
     values["provider"] = payload.provider.value
     values["thinking_levels"] = [level.value for level in payload.thinking_levels]
@@ -51,7 +51,7 @@ async def update_model(
         next_window = data.get("context_window", model.context_window)
         next_threshold = data.get("compaction_threshold", model.compaction_threshold)
         if next_threshold is not None and next_window is None:
-            raise UnprocessableError("Compaction threshold requires context_window")
+            raise UnprocessableError("设置压缩阈值前必须先设置 context_window")
     if payload.provider is not None:
         data["provider"] = payload.provider.value
     if payload.thinking_levels is not None:

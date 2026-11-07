@@ -463,13 +463,13 @@ def test_local_workspace_dir_is_stable_across_runs(tmp_path: Path) -> None:
 
 
 def test_sandbox_requires_both_key_and_platform_switch() -> None:
-    from app.sandbox.workspace import sandbox_enabled
+    from app.sandbox.workspace import can_use_sandbox
 
     settings = SimpleNamespace(sandbox_api_key="e2b-test", feature_sandbox_enabled=False)
-    assert sandbox_enabled(settings) is False
+    assert can_use_sandbox(settings) is False
 
     settings.feature_sandbox_enabled = True
-    assert sandbox_enabled(settings) is True
+    assert can_use_sandbox(settings) is True
 
     settings.sandbox_api_key = None
-    assert sandbox_enabled(settings) is False
+    assert can_use_sandbox(settings) is False

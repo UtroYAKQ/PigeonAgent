@@ -17,7 +17,11 @@ function appendArtifactMedia(live: LiveRun, media: LiveMedia[]): void {
   }
 }
 
-export function applyAgUiEvent(live: LiveRun, event: AgUiEvent): void {
+export function applyAgUiEvent(
+  live: LiveRun,
+  event: AgUiEvent,
+  resolveToolName?: (toolCallId: string) => string | undefined,
+): void {
   switch (event.type) {
     case 'RUN_STARTED':
       live.connected = true
@@ -116,7 +120,7 @@ export function applyAgUiEvent(live: LiveRun, event: AgUiEvent): void {
           kind: 'tool',
           tool: {
             toolCallId: event.toolCallId,
-            name: 'tool',
+            name: resolveToolName?.(event.toolCallId) ?? 'tool',
             argsText: '',
             state: 'success',
           },

@@ -182,6 +182,16 @@ describe('applyAgUiEvent 工具调用', () => {
     })
   })
 
+  it('resume 的结果能从历史补回工具名', () => {
+    const live = liveRun()
+    applyAgUiEvent(
+      live,
+      { type: 'TOOL_CALL_RESULT', toolCallId: 'call-resume', content: '{"opened":true}' },
+      toolCallId => (toolCallId === 'call-resume' ? 'ui_ask_user_question' : undefined),
+    )
+    expect(blockOf(live, 'call-resume')?.tool?.name).toBe('ui_ask_user_question')
+  })
+
   it('已有结果的工具有后到的 START 不会被覆盖成 running', () => {
     const live = apply(
       start,

@@ -122,7 +122,7 @@ class RunCreate(RunOptions):
         return self
 
     @property
-    def parent_was_given(self) -> bool:
+    def has_explicit_parent(self) -> bool:
         return "parent_run_id" in self.model_fields_set
 
 

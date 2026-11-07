@@ -6,13 +6,14 @@ run 是树节点；content 按发生顺序存 item。BaseItem 的两个开关分
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, Any, Literal, Self
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.file_ref import FileIdRef, FileRef
+from app.domain.time import now_utc
 from app.enums import ItemType
 
 USAGE_FIELDS = (
@@ -23,10 +24,6 @@ USAGE_FIELDS = (
     "cache_write_tokens",
     "total_tokens",
 )
-
-
-def now_utc() -> datetime:
-    return datetime.now(UTC)
 
 
 class TokenUsage(BaseModel):

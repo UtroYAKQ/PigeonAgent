@@ -23,7 +23,7 @@ from app.domain.run_items import ImageItem, ToolCallItem, ToolResultItem
 from app.models.file_record import FileRecord
 from app.sandbox.workspace import LocalWorkspace
 from app.services import file_service
-from app.services import run_store as run_service
+from app.services import run as run_service
 from tests.helpers import append_user_run, head, make_session
 from tests.test_files import FakeStorage
 
@@ -323,7 +323,7 @@ async def test_build_context_rehydrates_tool_result_media(
         ],
         parent_run_id=chat_session.active_leaf_run_id,
     )
-    monkeypatch.setattr(file_service, "get_storage", lambda: storage)
+    monkeypatch.setattr("app.services.file_service.content.get_storage", lambda: storage)
 
     context = await run_service.build_context(db_session, session_id)
 

@@ -11,8 +11,9 @@ from pydantic_ai import Agent, CancellationToken, DeferredToolResults
 from pydantic_ai.toolsets import AbstractToolset
 from pydantic_ai.ui.ag_ui import AGUIAdapter, AGUIEventStream
 
+from app.agents.errors import summarize_error
 from app.agents.store import SessionStore
-from app.agents.turn import AgentTurn, summarize_error
+from app.agents.turn import AgentTurn
 from app.core.config import DEFAULT_COMPACTION_THRESHOLD
 
 

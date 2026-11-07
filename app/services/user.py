@@ -26,6 +26,7 @@ from app.core.exceptions import (
     UnauthenticatedError,
     UnprocessableError,
 )
+from app.core.ids import parse_uuid
 from app.domain.media_type import effective_media_type
 from app.domain.time import ensure_utc
 from app.infra import mailer
@@ -61,7 +62,7 @@ async def _find_user(db: AsyncSession, email: str) -> User | None:
 def _pair_for(user: User, settings: Settings) -> TokenPairOut:
     secret = settings.secret_key
     if not secret:
-        raise ConfigurationError("SECRET_KEY must be configured")
+        raise ConfigurationError("SECRET_KEY 未配置")
     access = timedelta(minutes=settings.access_token_ttl_minutes)
     return TokenPairOut(
         access_token=security.issue_token(
@@ -92,7 +93,7 @@ async def _issue_code(db: AsyncSession, settings: Settings, email: str, purpose:
         # 这封信永远发不出去，必须当场报错，不能假装已送达
         raise ConfigurationError("邮箱验证已开启，但未配置 SMTP_HOST")
     if not settings.secret_key:
-        raise ConfigurationError("SECRET_KEY must be configured")
+        raise ConfigurationError("SECRET_KEY 未配置")
     code = f"{secrets.randbelow(10**6):06d}"
     now = datetime.now(UTC)
     await db.execute(
@@ -171,7 +172,7 @@ async def register(
 
     if user is None:
         password_hash = await asyncio.to_thread(security.hash_password, payload.password)
-        verified = not settings.email_verification_enabled
+        verified = not settings.is_email_verification_enabled
         user = User(
             email=email,
             password_hash=password_hash,
@@ -183,7 +184,7 @@ async def register(
         await db.commit()
     elif not user.is_active:
         if not user.email_verified:
-            if settings.email_verification_enabled:
+            if settings.is_email_verification_enabled:
                 # 重新提交未验证账号 = 重新发一封验证码，不重复建行
                 await _send_code(db, settings, email, REGISTER)
                 return user, None
@@ -202,7 +203,7 @@ async def register(
     else:
         raise ConflictError("该邮箱已注册")
 
-    if settings.email_verification_enabled:
+    if settings.is_email_verification_enabled:
         # 用户和验证码都已入库，但信没出去时必须让前端知道
         await _send_code(db, settings, email, REGISTER)
         return user, None
@@ -230,7 +231,7 @@ async def verify_email(db: AsyncSession, settings: Settings, email: str, code: s
         await db.commit()
         raise UnprocessableError("验证码已失效，请重新发送")
     if not settings.secret_key:
-        raise ConfigurationError("SECRET_KEY must be configured")
+        raise ConfigurationError("SECRET_KEY 未配置")
     if not hmac.compare_digest(row.digest, security.code_digest(code, settings.secret_key)):
         row.attempts += 1
         await db.commit()
@@ -252,7 +253,7 @@ async def resend_code(db: AsyncSession, settings: Settings, email: str) -> None:
     # 不存在的邮箱保持沉默：别把哪个邮箱注册过与否告诉调用方
     if user is None or user.is_active or user.email_verified:
         return
-    if not settings.email_verification_enabled:
+    if not settings.is_email_verification_enabled:
         # 验证没开就没有"重发"一说，登录时会直接放行；同样保持沉默
         return
     elapsed = await _seconds_since_last_code(db, email, REGISTER)
@@ -278,7 +279,7 @@ async def login(db: AsyncSession, settings: Settings, payload: LoginIn) -> Token
 
     if not user.is_active:
         if not user.email_verified:
-            if settings.email_verification_enabled:
+            if settings.is_email_verification_enabled:
                 # 冷却内 _send_code 不会真发第二封，所以文案只说"信在路上"，不承诺刚发过
                 await _send_code(db, settings, email, REGISTER)
                 raise ConflictError("邮箱未验证，验证码已发到你的邮箱，请查收")
@@ -295,10 +296,10 @@ async def refresh_tokens(db: AsyncSession, settings: Settings, refresh_token: st
     user_id, token_version = security.decode_token(
         refresh_token, security.REFRESH, secret_key=settings.secret_key
     )
-    try:
-        user = await db.get(User, uuid.UUID(user_id))
-    except ValueError as exc:
-        raise UnauthenticatedError("登录状态无效或已过期") from exc
+    parsed_id = parse_uuid(user_id)
+    if parsed_id is None:
+        raise UnauthenticatedError("登录状态无效或已过期")
+    user = await db.get(User, parsed_id)
     if user is None or not user.is_active or user.token_version != token_version:
         raise UnauthenticatedError("登录状态无效或已过期")
     return _pair_for(user, settings)

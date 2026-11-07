@@ -86,7 +86,7 @@ async def update_model(
         sizes = data.get("sizes", model.sizes)
         default_size = data.get("default_size", model.default_size)
         if default_size not in sizes:
-            raise UnprocessableError("default_size must be one of sizes")
+            raise UnprocessableError("default_size 必须是 sizes 中的一个")
     if data.get("is_default") is True:
         await _model_catalog.clear_defaults(db, IMAGE_CATALOG)
 

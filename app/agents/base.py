@@ -98,7 +98,7 @@ class BaseAgent:
 
     def _require_store(self) -> SessionStore:
         if self._store is None:
-            raise ConfigurationError("BaseAgent needs db and session_id to use history")
+            raise ConfigurationError("BaseAgent 需要 db 和 session_id 才能读取历史")
         return self._store
 
     # ---------------------------------------------------------------- 对话

@@ -3,6 +3,7 @@
 from typing import Any, ClassVar
 from uuid import uuid4
 
+import pytest
 from ag_ui.core import CustomEvent as AguiCustomEvent
 from pydantic_ai.messages import SystemPromptPart, UserPromptPart
 from pydantic_ai.models.test import TestModel
@@ -12,7 +13,8 @@ from app import codec
 from app.agents.base import BaseAgent
 from app.domain.run_items import CompactionItem, TextItem
 from app.schemas.run import SessionRunRead
-from app.services import run_store as run_service
+from app.services import run as run_service
+from app.services.run import context as run_context
 from tests.helpers import (
     append_run,
     append_user_run,
@@ -70,6 +72,36 @@ async def test_context_starts_at_compaction_item(db_session: AsyncSession) -> No
     assert "压缩点之后的内容" in texts
     assert "压缩点之前的内容" not in texts
     assert "很久以前的问题" not in texts
+
+
+async def test_context_loads_only_from_last_compaction(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """压缩点之前的 run 连 content 都不该反序列化，长会话的每轮成本才能降下来。"""
+    session_id = await make_session(db_session)
+    older = await append_user_run(db_session, session_id, "压缩点之前的问题")
+    marker = await append_user_run(db_session, session_id, "压缩点所在轮")
+    await run_service.record_compaction(
+        db_session, session_id, marker.id, CompactionItem(summary="早期结论")
+    )
+    tail_a = await append_user_run(db_session, session_id, "之后的第一问")
+    tail_b = await append_user_run(db_session, session_id, "之后的第二问")
+
+    captured: list[Any] = []
+    original = run_context.load_by_ids
+
+    async def spy(db: AsyncSession, ids: Any) -> Any:
+        captured.extend(ids)
+        return await original(db, ids)
+
+    monkeypatch.setattr(run_context, "load_by_ids", spy)
+
+    context = await run_service.build_context(db_session, session_id)
+
+    assert captured == [marker.id, tail_a.id, tail_b.id]
+    assert [run.id for run in context.runs] == [marker.id, tail_a.id, tail_b.id]
+    assert older.id not in captured
+    assert "压缩点之前的问题" not in texts_of(context.messages)
 
 
 async def test_context_uses_nearest_compaction_marker(db_session: AsyncSession) -> None:

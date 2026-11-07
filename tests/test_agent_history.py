@@ -30,7 +30,7 @@ from app.domain.run_items import (
 from app.enums import RunStatus
 from app.models.session import ChatSession
 from app.models.session_run import SessionRun
-from app.services import run_store as run_service
+from app.services import run as run_service
 from tests.helpers import (
     append_run,
     assistant,

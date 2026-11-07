@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, UnprocessableError
 from app.domain.run_items import ToolResultItem
-from app.services import run_store as run_service
+from app.services import run as run_service
 from tests.helpers import (
     append_user_run,
     approval_call,
@@ -52,7 +52,7 @@ async def test_pending_blocks_only_its_own_branch(db_session: AsyncSession) -> N
     declaring, _ = await declare_pending(db_session, session_id, [approval_call()])
     declaring_id = declaring.id
 
-    with pytest.raises(ConflictError, match="pending interrupts"):
+    with pytest.raises(ConflictError, match="未处理的中断"):
         await run_service.start_run_turn(
             db_session, session_id, run_id=str(uuid4()), user_input="新问题"
         )
@@ -81,7 +81,7 @@ async def test_resume_rejects_unknown_call(db_session: AsyncSession) -> None:
     batch_id = interrupts[0].interrupt_id
     batch = (await pending(db_session, session_id))[0]
 
-    with pytest.raises(UnprocessableError, match="is not pending"):
+    with pytest.raises(UnprocessableError, match="不是未决状态"):
         await run_service.start_run_turn(
             db_session,
             session_id,
@@ -100,7 +100,7 @@ async def test_resume_requires_a_pending_batch(db_session: AsyncSession) -> None
     session_id = await make_session(db_session)
     await declare_pending(db_session, session_id, [approval_call()])
 
-    with pytest.raises(ConflictError, match="not pending"):
+    with pytest.raises(ConflictError, match="不是未决状态"):
         await run_service.start_run_turn(
             db_session,
             session_id,
@@ -119,7 +119,7 @@ async def test_resume_must_cover_every_interrupt_in_the_batch(
     _, interrupts = await declare_pending(db_session, session_id, [approval_call(), price_call()])
     batch = (await pending(db_session, session_id))[0]
 
-    with pytest.raises(UnprocessableError, match="must cover"):
+    with pytest.raises(UnprocessableError, match="必须覆盖"):
         await run_service.start_run_turn(
             db_session,
             session_id,
@@ -187,7 +187,7 @@ async def test_expired_lease_is_reclaimable(db_session: AsyncSession) -> None:
     chat_session.active_run_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     await db_session.commit()
 
-    assert run_service.run_is_live(chat_session) is False
+    assert run_service.is_run_live(chat_session) is False
     await reserve_lease(db_session, session_id, "run-2")
     assert (await head(db_session, session_id)).active_run_id == "run-2"
 
@@ -222,7 +222,7 @@ async def test_resend_from_pending_turn_parent_is_allowed(
         run_id=str(uuid4()),
         user_input="改后的问题",
         parent_run_id=root_id,
-        parent_was_given=True,
+        has_explicit_parent=True,
     )
 
     assert edited.parent_run_id == root_id

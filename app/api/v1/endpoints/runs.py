@@ -21,7 +21,7 @@ from app.render.consumer import RenderConsumer
 from app.render.queue import RenderCursorInvalid
 from app.schemas.run import RunCreate, RunRead, RunResume
 from app.services import chat_session as session_service
-from app.services import run as run_service
+from app.services.run.launch import launch_run
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ async def start_run(
     user: CurrentUserDep,
     settings: SettingsDep,
 ) -> RunRead:
-    run_id = await run_service.launch_run(
+    run_id = await launch_run(
         db,
         session_id,
         payload,
@@ -77,7 +77,7 @@ async def resume_run(
     user: CurrentUserDep,
     settings: SettingsDep,
 ) -> RunRead:
-    run_id = await run_service.launch_run(
+    run_id = await launch_run(
         db,
         session_id,
         payload,
@@ -123,7 +123,7 @@ async def stream_run_events(
         try:
             after = int(last_event_id)
         except ValueError as exc:
-            raise UnprocessableError("Last-Event-ID must be an integer") from exc
+            raise UnprocessableError("Last-Event-ID 必须是整数") from exc
 
     try:
         consumer = await hub.subscribe(run_id, after, session_id=session_id)

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.events import ArtifactEvent, ArtifactMedia
 from app.core.config import Settings
+from app.core.exceptions import describe_error
 from app.domain.media_type import effective_media_type
 from app.sandbox.workspace import RunWorkspace, SandboxWorkspace, WorkspaceError
 from app.services import file_service
@@ -161,8 +162,8 @@ def _fail(tool_name: str, exc: Exception) -> dict[str, Any]:
     其余带上类型名并截断，避免把上游长篇响应体灌进模型上下文。
     """
     logger.error("Workspace tool %s failed", tool_name, exc_info=exc)
-    detail = str(exc) if isinstance(exc, WorkspaceError) else f"{type(exc).__name__}: {exc}"
-    return {"error": detail[:500]}
+    detail = describe_error(exc, include_type=not isinstance(exc, WorkspaceError))
+    return {"error": detail}
 
 
 def workspace_instructions(

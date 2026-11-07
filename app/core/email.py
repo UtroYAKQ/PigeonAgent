@@ -21,7 +21,7 @@ def _is_internal_domain(domain: str) -> bool:
     return domain == "localhost" or domain.endswith(_INTERNAL_SUFFIXES)
 
 
-def _valid_tld(domain: str) -> bool:
+def _is_valid_tld(domain: str) -> bool:
     """必须至少有一个点，且顶级域不是单个字符或纯数字。"""
     labels = domain.split(".")
     if len(labels) < 2:
@@ -40,7 +40,7 @@ def _validate_internal(value: str) -> str:
     labels = domain.split(".")
     if len(domain) > 253 or not all(_DOMAIN_LABEL.fullmatch(label) for label in labels):
         raise ValueError(_INVALID_MESSAGE)
-    if not _valid_tld(domain):
+    if not _is_valid_tld(domain):
         raise ValueError(_INVALID_MESSAGE)
     return f"{local}@{domain}".lower()
 
@@ -62,6 +62,6 @@ def validated_email(raw: str) -> str:
     normalized = normalized.lower()
     domain = normalized.rsplit("@", 1)[-1]
     # email-validator 不做 DNS，单字符和数字 TLD 也会通过；在发信前收紧。
-    if not _valid_tld(domain):
+    if not _is_valid_tld(domain):
         raise ValueError(_INVALID_MESSAGE)
     return normalized

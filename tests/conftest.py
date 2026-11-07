@@ -1,6 +1,6 @@
 import os
 import uuid as uuid_mod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import timedelta
 from pathlib import Path
 
@@ -35,7 +35,7 @@ from app.db import Base, enable_sqlite_pragmas, get_db, get_session_factory
 from app.main import app
 from app.models.user import User
 from app.render import RenderHub
-from app.services.run import RunRegistry
+from app.services.run.registry import RunRegistry
 from app.tasks.operation_log import OperationLogger
 
 # 默认临时文件 SQLite；设 TEST_DATABASE_URL 可让整套测试跑在 PostgreSQL 上
@@ -74,6 +74,16 @@ async def ensure_test_user(db_session: AsyncSession) -> User:
 @pytest.fixture
 def test_user_id() -> uuid_mod.UUID:
     return TEST_USER_ID
+
+
+@pytest.fixture(autouse=True)
+def _clear_media_cache() -> Iterator[None]:
+    # 媒体缓存是进程级单例；每个用例前后清空，避免用例之间互相命中
+    from app.services import file_service
+
+    file_service.clear_media_cache()
+    yield
+    file_service.clear_media_cache()
 
 
 @pytest.fixture

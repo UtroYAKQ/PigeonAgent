@@ -30,6 +30,23 @@ export default tseslint.config(
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       'vue/no-v-html': 'off',
+      // 新文件超过 500 行就该拆；存量大的先豁免，改到哪拆到哪。
+      'max-lines': ['error', { max: 500, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
+    files: [
+      'src/stores/chat/index.ts',
+      'src/lib/turnModel.ts',
+      'src/components/admin/ModelManagerPanel.vue',
+      'src/components/admin/ImageModelManagerPanel.vue',
+      'src/components/admin/UserManagementPanel.vue',
+      'src/components/chat/AppSidebar.vue',
+      'src/components/chat/Composer.vue',
+      '**/*.test.ts',
+    ],
+    rules: {
+      'max-lines': 'off',
     },
   },
   {

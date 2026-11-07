@@ -23,7 +23,7 @@ from app.domain.run_items import (
     ToolResultItem,
 )
 from app.enums import RunStatus
-from app.services import run_store as run_service
+from app.services import run as run_service
 from tests.helpers import (
     all_runs,
     append_run,
@@ -58,7 +58,7 @@ async def test_parent_from_other_session_is_rejected(db_session: AsyncSession) -
     other = await make_session(db_session)
     foreign = await append_user_run(db_session, other, "别人的根")
 
-    with pytest.raises(Exception, match="not found"):
+    with pytest.raises(Exception, match="不存在"):
         await run_service.create_run(
             db_session,
             session_id,
@@ -97,7 +97,7 @@ async def test_expired_lease_is_reclaimable(db_session: AsyncSession) -> None:
     chat_session.active_run_expires_at = datetime.now(UTC) - timedelta(seconds=1)
     await db_session.commit()
 
-    assert run_service.run_is_live(chat_session) is False
+    assert run_service.is_run_live(chat_session) is False
     await reserve_lease(db_session, session_id, "run-2")
     assert (await head(db_session, session_id)).active_run_id == "run-2"
 
@@ -106,8 +106,8 @@ async def test_live_lease_still_blocks_a_second_run(db_session: AsyncSession) ->
     session_id = await make_session(db_session)
     await reserve_lease(db_session, session_id, "run-1")
 
-    assert run_service.run_is_live(await head(db_session, session_id)) is True
-    with pytest.raises(ConflictError, match="active run"):
+    assert run_service.is_run_live(await head(db_session, session_id)) is True
+    with pytest.raises(ConflictError, match="正在运行的轮次"):
         await run_service.start_run_turn(
             db_session, session_id, run_id=str(uuid4()), user_input="插队"
         )
@@ -152,7 +152,7 @@ async def test_declare_interrupts_isolated_per_session(db_session: AsyncSession)
     foreign = await append_user_run(db_session, other, "别人的问题")
     requests = codec.to_request_items(DeferredToolRequests(approvals=[approval_call()], calls=[]))
 
-    with pytest.raises(Exception, match="not found"):
+    with pytest.raises(Exception, match="不存在"):
         await run_service.append_items(db_session, session_id, foreign.id, requests)
 
 

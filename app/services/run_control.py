@@ -114,7 +114,7 @@ class RunControl:
             )
             return True
 
-    async def cancel_requested(self, run_id: str) -> bool:
+    async def is_cancel_requested(self, run_id: str) -> bool:
         async with asyncio.timeout(COMMAND_TIMEOUT_SECONDS):
             return bool(await self._redis.exists(self._cancel_key(run_id)))
 

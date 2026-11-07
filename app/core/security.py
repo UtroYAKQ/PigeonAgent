@@ -31,7 +31,7 @@ def decrypt_secret(ciphertext: str, secret_key: str) -> str:
     try:
         return _cipher(secret_key).decrypt(ciphertext.encode()).decode()
     except InvalidToken as exc:
-        raise ConfigurationError("Unable to decrypt API key; check SECRET_KEY") from exc
+        raise ConfigurationError("无法解密 API Key，请检查 SECRET_KEY") from exc
 
 
 @lru_cache(maxsize=16)
@@ -39,7 +39,7 @@ def _cipher(secret_key: str) -> Fernet:
     try:
         return Fernet(secret_key.encode())
     except ValueError as exc:
-        raise ConfigurationError("SECRET_KEY must be a valid Fernet key") from exc
+        raise ConfigurationError("SECRET_KEY 必须是合法的 Fernet 密钥") from exc
 
 
 # ---------------------------------------------------------------- 密码
@@ -71,7 +71,7 @@ def issue_token(
     token_version: int = 0,
 ) -> str:
     if not secret_key:
-        raise ConfigurationError("SECRET_KEY must be configured")
+        raise ConfigurationError("SECRET_KEY 未配置")
     now = datetime.now(UTC)
     claims = {
         "sub": user_id,
@@ -88,7 +88,7 @@ def issue_token(
 def decode_token(token: str, expected_type: str, *, secret_key: str | None) -> tuple[str, int]:
     """校验通过时返回 (用户 id, token 版本)；版本与用户当前值不符即失效。"""
     if not secret_key:
-        raise ConfigurationError("SECRET_KEY must be configured")
+        raise ConfigurationError("SECRET_KEY 未配置")
     try:
         claims = jwt.decode(token, secret_key, algorithms=["HS256"])
     except jwt.PyJWTError as error:
