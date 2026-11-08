@@ -34,6 +34,9 @@ REMOTE_TIMEOUT_SECONDS = 2.0
 # 挂起是网络调用，放在后台巡检里做；超时后不再重试，保活到空闲回收
 PAUSE_TIMEOUT_SECONDS = 15.0
 PAUSE_WAIT_SECONDS = PAUSE_TIMEOUT_SECONDS + 5.0
+# 使用中的沙箱每分钟续一次上游 TTL，run 跑得比 TTL 长也不会半路被上游杀掉
+RENEW_INTERVAL_SECONDS = 60.0
+RENEW_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass
@@ -41,6 +44,8 @@ class _Entry:
     sandbox: AsyncSandbox
     sandbox_id: str
     last_touch: float = field(default_factory=time.monotonic)
+    # 上游 TTL 上次续期时间；使用中由巡检定期续期
+    last_renew: float = field(default_factory=time.monotonic)
     paused: bool = False
     run_id: str | None = None
     # 正在被 run 使用时巡检不能回收
@@ -221,14 +226,44 @@ class SandboxPool:
                 entry.sandbox = sandbox
                 entry.sandbox_id = sandbox.sandbox_id
             entry.paused = False
+            entry.last_renew = time.monotonic()
             return
         # 保活中的容器也要续期：上游 TTL 从创建起算，不续期到点就杀
+        if await self._renew_timeout(entry):
+            return
+        # 续期失败可能只是网关不支持 timeout 接口；重连一次确认并顺带续期。
+        # 连不上才说明真过期了，必须换新沙箱，不能把死句柄交给工具。
+        started = time.monotonic()
+        try:
+            entry.sandbox = await connect_sandbox(self.settings, entry.sandbox_id)
+        except Exception:
+            logger.info(
+                "Sandbox %s for session %s is gone; recreating", entry.sandbox_id, session_id
+            )
+            sandbox = await create_sandbox(self.settings)
+            entry.sandbox = sandbox
+            entry.sandbox_id = sandbox.sandbox_id
+        else:
+            logger.info(
+                "Sandbox %s resumed to renew timeout for session %s in %.2fs",
+                entry.sandbox_id,
+                session_id,
+                time.monotonic() - started,
+            )
+        entry.last_renew = time.monotonic()
+
+    async def _renew_timeout(self, entry: _Entry) -> bool:
         set_timeout = getattr(entry.sandbox, "set_timeout", None)
-        if callable(set_timeout):
-            try:
+        if not callable(set_timeout):
+            return True
+        try:
+            async with asyncio.timeout(RENEW_TIMEOUT_SECONDS):
                 await set_timeout(sandbox_ttl(self.settings))
-            except Exception:
-                logger.info("Failed to renew timeout for sandbox %s", entry.sandbox_id)
+        except Exception:
+            logger.info("Failed to renew timeout for sandbox %s", entry.sandbox_id, exc_info=True)
+            return False
+        entry.last_renew = time.monotonic()
+        return True
 
     def touch(self, session_id: UUID) -> None:
         entry = self._entries.get(session_id)
@@ -345,6 +380,11 @@ class SandboxPool:
                     current = self._entries.get(session_id)
                     if current is None or not current.in_use:
                         continue
+                    # 使用中持续续期，避免上游 TTL 或共享指针先到期。
+                    # 只写 Redis 不够：上游 TTL 在沙箱侧，长 run 照样会到点被杀；
+                    # 续期不依赖 Redis，registry 抖动时也要继续。
+                    if now - current.last_renew >= RENEW_INTERVAL_SECONDS:
+                        await self._renew_timeout(current)
                     try:
                         remote = await self._remote_get_checked(session_id)
                     except Exception:
@@ -356,7 +396,6 @@ class SandboxPool:
                     if self._remote_owned_by_other(remote):
                         # 本 run 正在用本地沙箱，不能在这里杀；远端由持有者收尾
                         continue
-                    # 使用中持续续期，避免上游 TTL 或共享指针先到期
                     await self._remote_save(session_id, current)
                 continue
             if entry.last_touch >= max(pause_cutoff, kill_cutoff):

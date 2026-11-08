@@ -236,6 +236,76 @@ async def test_warm_acquire_renews_upstream_ttl(pool: SandboxPool) -> None:
     assert sandbox.timeouts == [900]  # idle 600 + 300 余量，且必须是整数
 
 
+async def test_in_use_sweep_renews_upstream_ttl(pool: SandboxPool) -> None:
+    """长 run 期间巡检要续上游 TTL；只刷新 Redis 指针挡不住沙箱到点被杀。"""
+    sandbox = _FakeSandbox("sbx-live")
+    session = uuid4()
+    entry = _Entry(sandbox=sandbox, sandbox_id="sbx-live", in_use=True, run_id="run-9")
+    entry.last_renew = time.monotonic() - sp_mod.RENEW_INTERVAL_SECONDS - 1
+    pool._entries[session] = entry
+
+    await pool._sweep_once()
+
+    assert sandbox.timeouts == [900]
+    assert not sandbox.killed
+    assert entry.last_renew > time.monotonic() - 5
+
+
+async def test_warm_sandbox_recreated_when_renew_and_connect_fail(
+    pool: SandboxPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """续期和重连都失败说明上游已经过期：必须换新沙箱，不能把死句柄交给工具。"""
+
+    class ExpiredSandbox(_FakeSandbox):
+        async def set_timeout(self, seconds: Any) -> None:
+            raise RuntimeError("SessionExpired")
+
+    dead = ExpiredSandbox("sbx-dead")
+    fresh = _FakeSandbox("sbx-fresh")
+    session = uuid4()
+    pool._entries[session] = _Entry(sandbox=dead, sandbox_id="sbx-dead")
+
+    async def fake_connect(_settings: Any, _sandbox_id: str) -> Any:
+        raise RuntimeError("session is expired")
+
+    async def fake_create(_settings: Any) -> Any:
+        return fresh
+
+    monkeypatch.setattr(sp_mod, "connect_sandbox", fake_connect)
+    monkeypatch.setattr(sp_mod, "create_sandbox", fake_create)
+
+    assert await pool.acquire(session, "run-10") is fresh
+    assert pool._entries[session].sandbox_id == "sbx-fresh"
+
+
+async def test_warm_sandbox_reconnected_when_renew_api_unsupported(
+    pool: SandboxPool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """网关不认 timeout 接口时，重连本身带 timeout，可以就地续期而不是重建。"""
+
+    class NoRenewSandbox(_FakeSandbox):
+        async def set_timeout(self, seconds: Any) -> None:
+            raise NotImplementedError("timeout endpoint not enabled")
+
+    old = NoRenewSandbox("sbx-keep")
+    resumed = _FakeSandbox("sbx-keep")
+    session = uuid4()
+    pool._entries[session] = _Entry(sandbox=old, sandbox_id="sbx-keep")
+
+    async def fake_connect(_settings: Any, sandbox_id: str) -> Any:
+        assert sandbox_id == "sbx-keep"
+        return resumed
+
+    async def fake_create(_settings: Any) -> Any:
+        raise AssertionError("重连成功就不该新建沙箱")
+
+    monkeypatch.setattr(sp_mod, "connect_sandbox", fake_connect)
+    monkeypatch.setattr(sp_mod, "create_sandbox", fake_create)
+
+    assert await pool.acquire(session, "run-11") is resumed
+    assert pool._entries[session].sandbox is resumed
+
+
 async def test_paused_acquire_skips_renew(
     pool: SandboxPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
