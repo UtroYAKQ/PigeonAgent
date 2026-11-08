@@ -8,7 +8,9 @@ from typing import Any
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.run_items import TokenUsage
 from app.models.account.user import User
+from app.models.chat.log import ChatRequestLog
 from tests.helpers import make_session
 
 
@@ -43,6 +45,31 @@ async def test_admin_users_list_exposes_email_verification(
     item = users.json()["items"][0]
     assert item["email_verified"] is False
     assert item["is_active"] is False
+
+
+async def test_admin_chat_logs_lists_request_logs(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """聊天记录直接序列化 ChatRequestLog；run kind 早已删除，响应模型不能再要它。"""
+    member, _ = await _register_member(client)
+    db_session.add(
+        ChatRequestLog(
+            user_id=uuid.UUID(member["id"]),
+            run_id=uuid.uuid4(),
+            status="completed",
+            model_name="demo-model",
+            usage=TokenUsage(input_tokens=12, output_tokens=3),
+            credits_charged=0.5,
+        )
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/v1/admin/chat-logs", params={"limit": 10})
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["model_name"] == "demo-model"
+    assert item["user_email"] == "member-admin@example.com"
+    assert "kind" not in item
 
 
 async def _register_member(client: AsyncClient) -> tuple[dict[str, Any], dict[str, str]]:

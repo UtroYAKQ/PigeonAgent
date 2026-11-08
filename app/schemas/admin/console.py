@@ -170,7 +170,6 @@ class AdminChatLogRead(BaseModel):
     user_display_name: str | None = None
     session_id: UUID | None = None
     run_id: UUID | None = None
-    kind: str
     status: str
     model_name: str | None = None
     usage: TokenUsage

@@ -62,7 +62,6 @@ export interface AdminChatLog {
   user_display_name: string | null
   session_id: UUID | null
   run_id: UUID | null
-  kind: string
   status: string
   model_name: string | null
   usage: TokenUsage
