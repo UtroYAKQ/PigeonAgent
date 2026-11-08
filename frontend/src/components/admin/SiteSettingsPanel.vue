@@ -16,6 +16,7 @@ const site = useSiteStore()
 const name = ref('')
 const description = ref('')
 const logoUrl = ref<string | null>(null)
+const itemCount = ref(0)
 const loading = ref(true)
 const saving = ref(false)
 const uploading = ref(false)
@@ -32,6 +33,7 @@ async function load(): Promise<void> {
   try {
     const data = await configsApi.list()
     const byKey = new Map(data.items.map(item => [item.key, item]))
+    itemCount.value = data.items.filter(item => item.category === 'site').length
     name.value = byKey.get('site_name')?.value ?? ''
     description.value = byKey.get('site_description')?.value ?? ''
     logoUrl.value = byKey.get('site_logo_url')?.value ?? null
@@ -118,8 +120,10 @@ onMounted(load)
 <template>
   <div class="space-y-5">
     <div class="flex items-center justify-between gap-3">
-      <p class="text-sm text-muted-foreground">站点名称和 Logo 会用于登录页、侧栏、分享页与浏览器标题。</p>
-      <Button variant="outline" class="h-9" :disabled="loading" @click="load">
+      <p v-if="!loading && !loadError" class="text-sm text-muted-foreground">
+        共 {{ itemCount }} 项配置
+      </p>
+      <Button variant="outline" class="ml-auto h-9" :disabled="loading" @click="load">
         <RefreshCw class="size-4" :class="loading ? 'animate-spin' : ''" />
         刷新
       </Button>
