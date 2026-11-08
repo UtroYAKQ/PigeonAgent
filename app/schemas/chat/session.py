@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.domain.run_items import TokenUsage
 from app.enums import SessionStatus, ThinkingLevel
+from app.schemas.mcp import MAX_MCP_SERVERS
 
 
 class SessionCreate(BaseModel):
@@ -15,6 +16,8 @@ class SessionCreate(BaseModel):
     model_id: int | None = None
     group_id: int | None = None
     thinking_level: ThinkingLevel | None = None
+    # 新会话第一次发送前就能勾选 MCP，创建时一并落库
+    mcp_server_ids: list[UUID] = Field(default_factory=list, max_length=MAX_MCP_SERVERS)
 
 
 class SessionUpdate(BaseModel):
@@ -25,6 +28,8 @@ class SessionUpdate(BaseModel):
     status: SessionStatus | None = None
     # 传 null 表示回到模型默认挡位；非空值必须在该模型声明的挡位里
     thinking_level: ThinkingLevel | None = None
+    # 传 null 或 [] 表示清空 MCP 选择；不带这个键表示不动
+    mcp_server_ids: list[UUID] | None = None
     # 传 null 表示移出分组；不带这个键表示不动分组
     group_id: int | None = None
 
@@ -47,6 +52,7 @@ class SessionRead(BaseModel):
     run_seq: int
     has_unread: bool = False
     thinking_level: ThinkingLevel | None = None
+    mcp_server_ids: list[UUID] = Field(default_factory=list)
     active_run_id: str | None
     active_run_expires_at: datetime | None = None
     # 当前分支的叶子 run；上下文、分页和重新生成都从它往根走。

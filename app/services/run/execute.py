@@ -58,6 +58,8 @@ async def execute_run(
     deferred_tool_results: DeferredToolResults | None = None,
     registry: RunRegistry | None = None,
     toolset: AbstractToolset[Any] | None = None,
+    mcp_toolsets: list[AbstractToolset[Any]] | None = None,
+    mcp_instructions: str | None = None,
     enable_web_search: bool = False,
     enable_image_generation: bool = True,
     image_model_id: int | None = None,
@@ -129,7 +131,7 @@ async def execute_run(
             session_factory=session_factory,
             run_id=run_id,
             tools=bundle.tools,
-            prompt=bundle.instructions,
+            prompt="\n\n".join(part for part in (bundle.instructions, mcp_instructions) if part),
             context_window=resolved.context_window,
             compaction_threshold=(
                 resolved.compaction_threshold
@@ -139,13 +141,18 @@ async def execute_run(
             supports_tools=resolved.supports_tools,
             on_usage=usage_guard,
         )
+        toolsets: list[AbstractToolset[Any]] = []
+        if resolved.supports_tools:
+            toolsets.extend(mcp_toolsets or [])
+            if toolset is not None:
+                toolsets.append(toolset)
         # 用户消息已经在 start_run_turn 里写入，agent 只从 message_history 读
         async for event in agent.agui_events(
             None,
             run_id=run_id,
             deferred_tool_results=deferred_tool_results,
             cancellation_token=cancellation_token,
-            toolsets=([toolset] if toolset is not None and resolved.supports_tools else None),
+            toolsets=toolsets or None,
         ):
             if not has_logged_first_event:
                 has_logged_first_event = True

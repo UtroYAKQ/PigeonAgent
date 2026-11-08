@@ -4,6 +4,7 @@ from app.models.admin.config import AppConfig
 from app.models.admin.operation_log import OperationLog
 from app.models.ai.image import ImageModel
 from app.models.ai.llm import LlmModel
+from app.models.ai.mcp import McpServer
 from app.models.chat.groups import SessionGroup
 from app.models.chat.log import ChatRequestLog
 from app.models.chat.run import SessionRun
@@ -24,6 +25,7 @@ __all__ = [
     "FileRecord",
     "ImageModel",
     "LlmModel",
+    "McpServer",
     "OperationLog",
     "SessionGroup",
     "SessionRun",

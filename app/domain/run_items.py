@@ -134,6 +134,8 @@ class ToolCallItem(BaseItem):
     tool_call_id: str
     tool_name: str
     args: Any = None
+    # pydantic-ai 的 typed tool part 判别位；普通工具为空，tool-search 等内部工具保留
+    tool_kind: str | None = None
     part_id: str | None = None
     provider_name: str | None = None
     provider_details: dict[str, Any] | None = None
@@ -145,6 +147,8 @@ class ToolResultItem(BaseItem):
     tool_name: str
     content: Any = None
     outcome: Literal["success", "failed", "denied", "interrupted", "retried"] = "success"
+    # 回放时用 narrow_type 还原 ToolSearchReturnPart；普通工具为空
+    tool_kind: str | None = None
     metadata: Any = None
     # 工具结果里被剥出的媒体引用；回放时按 file_id 取回字节
     media: list[FileRef] = Field(default_factory=list)

@@ -98,6 +98,8 @@ export const useChatStore = defineStore('chat', () => {
 
   const pendingModelId = ref<number | null>(null)
   const pendingThinkingLevel = ref<ThinkingLevel | null>(null)
+  // 新会话创建前先记在本地，创建时一并落库
+  const pendingMcpServerIds = ref<UUID[]>([])
   const capabilities = ref<Capabilities | null>(null)
   const webSearchEnabled = useLocalStorage('pigeon.web-search', false)
   // 图片默认开着：模型自主决定画不画，用户多数时候不需要每次手动打开
@@ -133,6 +135,14 @@ export const useChatStore = defineStore('chat', () => {
     () => Boolean(capabilities.value?.web_search) && currentModel.value?.supports_tools !== false,
   )
   const effectiveWebSearch = computed(() => webSearchEnabled.value && webSearchAvailable.value)
+  const mcpServers = computed(() => capabilities.value?.mcp_servers ?? [])
+  const maxMcpServers = computed(() => capabilities.value?.max_mcp_servers ?? 5)
+  const mcpAvailable = computed(
+    () => mcpServers.value.length > 0 && currentModel.value?.supports_tools !== false,
+  )
+  const selectedMcpServerIds = computed(
+    () => currentSession.value?.mcp_server_ids ?? pendingMcpServerIds.value,
+  )
   const imageModels = computed(() => capabilities.value?.image_models ?? [])
   const currentImageModel = computed(() => {
     const selected = imageModels.value.find(model => model.id === imageModelId.value)
@@ -228,6 +238,7 @@ export const useChatStore = defineStore('chat', () => {
     panels.closeTabs(sessionId)
     currentSessionId.value = null
     currentSession.value = null
+    pendingMcpServerIds.value = []
     loadingSession.value = false
     sessionError.value = null
   }
@@ -436,8 +447,10 @@ export const useChatStore = defineStore('chat', () => {
       model_id: payload.modelId ?? currentModelId.value ?? defaultModel.value?.id ?? null,
       group_id: payload.groupId ?? null,
       thinking_level: currentThinkingLevel.value,
+      mcp_server_ids: pendingMcpServerIds.value,
     })
     sessions.value = [session, ...sessions.value]
+    pendingMcpServerIds.value = []
     currentSessionId.value = session.id
     currentSession.value = session
     runs.value = []
@@ -817,6 +830,40 @@ export const useChatStore = defineStore('chat', () => {
     webSearchEnabled.value = value
   }
 
+  async function applyMcpServerEnabled(serverId: UUID, enabled: boolean): Promise<void> {
+    const session = currentSession.value
+    if (!session) {
+      const next = new Set(pendingMcpServerIds.value)
+      if (enabled) next.add(serverId)
+      else next.delete(serverId)
+      if (next.size > maxMcpServers.value) {
+        throw new Error(`每个会话最多启用 ${maxMcpServers.value} 个 MCP 服务器`)
+      }
+      pendingMcpServerIds.value = [...next]
+      return
+    }
+    if (session.pending_batches > 0) {
+      throw new Error('有未决的工具调用，先处理完再修改 MCP 选择')
+    }
+    const next = new Set(session.mcp_server_ids)
+    if (enabled) next.add(serverId)
+    else next.delete(serverId)
+    if (next.size > maxMcpServers.value) {
+      throw new Error(`每个会话最多启用 ${maxMcpServers.value} 个 MCP 服务器`)
+    }
+    const updated = await sessionsApi.update(session.id, { mcp_server_ids: [...next] })
+    updateSessionInLists(updated)
+  }
+
+  // 连续点选时逐个 PATCH，后一个请求基于前一个完成后的选择，避免互相覆盖
+  let mcpSelectionQueue: Promise<void> = Promise.resolve()
+
+  function setMcpServerEnabled(serverId: UUID, enabled: boolean): Promise<void> {
+    const task = mcpSelectionQueue.then(() => applyMcpServerEnabled(serverId, enabled))
+    mcpSelectionQueue = task.catch(() => undefined)
+    return task
+  }
+
   function setImageModel(id: number | null): void {
     if (id === null) {
       imageGenerationEnabled.value = false
@@ -894,6 +941,11 @@ export const useChatStore = defineStore('chat', () => {
     imageModelId,
     currentImageModel,
     setImageModel,
+    mcpServers,
+    mcpAvailable,
+    maxMcpServers,
+    selectedMcpServerIds,
+    setMcpServerEnabled,
     maxUploadBytes,
     maxImageAttachments,
     maxResourceFiles,

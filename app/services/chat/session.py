@@ -11,6 +11,7 @@ from app.models.chat.run import SessionRun
 from app.models.chat.session import ChatSession
 from app.sandbox.workspace import purge_session_workspace
 from app.schemas.chat.session import SessionCreate, SessionUpdate
+from app.services import mcp as mcp_service
 from app.services.chat import groups as session_group
 
 
@@ -70,12 +71,14 @@ async def create_session(
     await _validate_group(db, payload.group_id, owner_id=owner_id)
     if payload.thinking_level is not None:
         _require_supported_thinking_level(model or await _default_model(db), payload.thinking_level)
+    selected_mcp = await mcp_service.validate_selection(db, payload.mcp_server_ids)
     chat_session = ChatSession(
         owner_id=owner_id,
         title=payload.title,
         model_id=payload.model_id,
         group_id=payload.group_id,
         thinking_level=payload.thinking_level.value if payload.thinking_level else None,
+        mcp_server_ids=[str(server_id) for server_id in selected_mcp],
     )
     db.add(chat_session)
     await db.commit()
@@ -95,6 +98,12 @@ async def update_session(
         next_model = await _validate_model(db, data["model_id"])
     if "group_id" in data:
         await _validate_group(db, data["group_id"], owner_id=owner_id)
+    if "mcp_server_ids" in payload.model_fields_set:
+        # 待审批的调用里可能就有 MCP 工具；这时换选择会让 resume 找不到对应工具
+        if chat_session.pending_batches > 0:
+            raise UnprocessableError("有未决的工具调用，先处理完再修改 MCP 选择")
+        selected = await mcp_service.validate_selection(db, payload.mcp_server_ids or [])
+        data["mcp_server_ids"] = [str(server_id) for server_id in selected]
     explicit_level = "thinking_level" in payload.model_fields_set
     if explicit_level and payload.thinking_level is not None:
         # 早期/接口创建的会话可能没有绑定 model_id；挡位按默认模型校验，

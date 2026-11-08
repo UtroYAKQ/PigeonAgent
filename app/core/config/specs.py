@@ -270,6 +270,13 @@ CONFIG_SPECS: tuple[ConfigSpec, ...] = (
         value_type=ConfigValueType.BOOLEAN,
     ),
     ConfigSpec(
+        key="feature_mcp_enabled",
+        category=ConfigCategory.FEATURES,
+        label="允许 MCP 工具",
+        description="关闭后即使管理员配置了 MCP 服务器，也不会把对应工具下发给模型",
+        value_type=ConfigValueType.BOOLEAN,
+    ),
+    ConfigSpec(
         key="feature_sandbox_enabled",
         category=ConfigCategory.FEATURES,
         label="允许沙箱执行",

@@ -1,6 +1,6 @@
 /* model 领域类型。 */
 
-
+import type { McpServerOption } from './mcp'
 
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
@@ -28,6 +28,13 @@ export interface LlmModel {
 export interface LlmModelList {
   items: LlmModel[]
   total: number
+}
+
+export interface LlmModelProbeResult {
+  ok: boolean
+  latency_ms: number
+  output: string | null
+  error: string | null
 }
 
 export interface LlmModelCreatePayload {
@@ -122,6 +129,8 @@ export interface Capabilities {
   image_generation: boolean
   image_models: ImageModelOption[]
   default_image_model_id: number | null
+  mcp_servers: McpServerOption[]
+  max_mcp_servers: number
   max_upload_bytes: number
   max_image_attachments: number
   max_resource_files: number

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic_ai import CancellationToken, DeferredToolResults
+from pydantic_ai.toolsets import AbstractToolset
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools import frontend_toolset
+from app.agents.tools.mcp import build_mcp_setup
 from app.core.config import Settings, get_settings
 from app.core.exceptions import ConflictError, UnprocessableError
 from app.db.session import SessionFactory
@@ -18,6 +21,7 @@ from app.render.hub import RenderHub
 from app.sandbox.pool import SandboxPool
 from app.schemas.run import RunCreate, RunResume
 from app.services import file_service
+from app.services import mcp as mcp_service
 from app.services.billing import service as billing
 from app.services.chat import session as session_service
 from app.services.model import image as image_model_service
@@ -103,6 +107,13 @@ async def launch_run(
         toolset = None
         enable_image_generation = False
         image_model_id = None
+    mcp_toolsets: list[AbstractToolset[Any]] = []
+    mcp_instructions: str | None = None
+    if resolved.supports_tools and runtime.feature_mcp_enabled and chat_session.mcp_server_ids:
+        servers = await mcp_service.resolve_enabled(db, chat_session.mcp_server_ids)
+        setup = build_mcp_setup(servers, settings=runtime)
+        mcp_toolsets = setup.toolsets
+        mcp_instructions = setup.instructions
     # 明确选了一个不可用的模型时当场拒掉；后台再发现就没法给请求返回 422 了
     if (
         image_model_id is not None
@@ -166,6 +177,8 @@ async def launch_run(
             cancellation_token=cancellation_token,
             registry=registry,
             toolset=toolset,
+            mcp_toolsets=mcp_toolsets,
+            mcp_instructions=mcp_instructions,
             enable_web_search=enable_web_search,
             enable_image_generation=enable_image_generation,
             image_model_id=image_model_id,

@@ -3,6 +3,7 @@
 export * from './common'
 export * from './auth'
 export * from './model'
+export * from './mcp'
 export * from './config'
 export * from './session'
 export * from './file'

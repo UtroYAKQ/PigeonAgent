@@ -44,6 +44,7 @@ export interface ChatSession {
   pending_batches: number
   has_unread: boolean
   thinking_level: ThinkingLevel | null
+  mcp_server_ids: UUID[]
   usage: TokenUsage
   last_run_at: string
   created_at: string
@@ -69,6 +70,7 @@ export interface SessionCreatePayload {
   model_id?: number | null
   group_id?: number | null
   thinking_level?: ThinkingLevel | null
+  mcp_server_ids?: UUID[]
 }
 
 export interface SessionUpdatePayload {
@@ -77,4 +79,5 @@ export interface SessionUpdatePayload {
   status?: SessionStatus
   group_id?: number | null
   thinking_level?: ThinkingLevel | null
+  mcp_server_ids?: UUID[] | null
 }

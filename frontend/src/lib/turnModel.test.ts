@@ -530,6 +530,26 @@ describe('buildTurnView', () => {
     expect(failed.blocks.some(block => block.type === 'chain')).toBe(true)
   })
 
+  it('keeps the tool-search card while streaming', () => {
+    const live = buildTurnView(
+      run([], 'running'),
+      liveRun([
+        {
+          id: 'search-1',
+          kind: 'tool',
+          tool: {
+            toolCallId: 'search-1',
+            name: 'search_tools',
+            argsText: '{"queries":["github"]}',
+            state: 'success',
+            resultText: '{"discovered_tools":[{"name":"mcp_github__get_me"}]}',
+          },
+        },
+      ]),
+    )
+    expect(live.blocks.some(block => block.type === 'chain')).toBe(true)
+  })
+
   it('stands a pending media block in while an image is generating', () => {
     const live = buildTurnView(
       run([], 'running'),

@@ -89,6 +89,7 @@ def items_from_response_part(part: Any) -> list[RunItem]:
                 tool_call_id=part.tool_call_id,
                 tool_name=part.tool_name,
                 args=to_json_value(part.args),
+                tool_kind=getattr(part, "tool_kind", None),
                 part_id=part.id,
                 provider_name=part.provider_name,
                 provider_details=part.provider_details,
@@ -139,6 +140,7 @@ def tool_result_item(part: ToolReturnPart | RetryPromptPart) -> ToolResultItem:
         tool_name=part.tool_name,
         content=content_to_json(part.content),
         outcome=outcome,
+        tool_kind=getattr(part, "tool_kind", None),
         metadata=to_json_value(metadata),
         media=media,
     )

@@ -1,8 +1,10 @@
 from fastapi import APIRouter
 
 from app.api.deps import CurrentUserDep, SessionDep, SettingsDep
+from app.schemas.mcp import MAX_MCP_SERVERS, McpServerOption
 from app.schemas.model.capabilities import CapabilitiesRead, ImageModelOption
 from app.schemas.run import MAX_ATTACHMENTS, MAX_RESOURCES
+from app.services import mcp as mcp_service
 from app.services.model import image as image_model_service
 
 router = APIRouter(prefix="/capabilities", tags=["capabilities"])
@@ -18,6 +20,7 @@ async def capabilities(
         (model for model in image_models if model.is_default),
         image_models[0] if image_models else None,
     )
+    mcp_servers = await mcp_service.list_enabled_options(db) if settings.feature_mcp_enabled else []
     return CapabilitiesRead(
         web_search=settings.can_use_web_search,
         image_generation=bool(image_models) and settings.feature_image_generation_enabled,
@@ -34,6 +37,8 @@ async def capabilities(
             for model in image_models
         ],
         default_image_model_id=default_image_model.id if default_image_model else None,
+        mcp_servers=[McpServerOption.model_validate(server) for server in mcp_servers],
+        max_mcp_servers=MAX_MCP_SERVERS,
         max_upload_bytes=settings.max_upload_bytes,
         max_image_attachments=MAX_ATTACHMENTS,
         max_resource_files=MAX_RESOURCES,

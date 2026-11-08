@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunItem } from '@/types/api'
-import { buildToolSteps, fileLanguage } from './tools'
+import { buildToolSteps, fileLanguage, toolLabel } from './tools'
 
 const now = '2026-01-01T00:00:00Z'
 
@@ -54,6 +54,35 @@ describe('buildToolSteps', () => {
     ]
 
     expect(buildToolSteps(items)[0]?.state).toBe('failed')
+  })
+
+  it('skips hidden tool artifacts', () => {
+    const items: RunItem[] = [
+      {
+        ...base('c1'),
+        display: false,
+        type: 'tool_call',
+        tool_call_id: 'call-1',
+        tool_name: 'hidden_tool',
+        args: {},
+      },
+      {
+        ...base('r1'),
+        display: false,
+        type: 'tool_result',
+        tool_call_id: 'call-1',
+        tool_name: 'hidden_tool',
+        content: {},
+        outcome: 'success',
+      },
+    ]
+
+    expect(buildToolSteps(items)).toEqual([])
+  })
+
+  it('renders MCP tools with their server prefix', () => {
+    expect(toolLabel('mcp_github__get_me', 'running')).toContain('github')
+    expect(toolLabel('mcp_github__get_me', 'success')).toContain('github')
   })
 
   it('keeps a successful outcome successful', () => {

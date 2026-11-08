@@ -33,6 +33,7 @@ import AuthMedia from './AuthMedia.vue'
 import CapabilityToggle from './CapabilityToggle.vue'
 import FileAttachment from './FileAttachment.vue'
 import ImageModelPicker from './ImageModelPicker.vue'
+import McpPicker from './McpPicker.vue'
 import ModelPicker from './ModelPicker.vue'
 import ThinkingLevelPicker from './ThinkingLevelPicker.vue'
 
@@ -446,6 +447,7 @@ onBeforeUnmount(() => {
           <Globe2 class="size-3.5" :stroke-width="1.8" />
         </CapabilityToggle>
         <ImageModelPicker v-if="chat.imageGenerationAvailable" />
+        <McpPicker v-if="chat.mcpAvailable" />
         <div class="ml-auto flex items-center gap-1.5">
           <span v-if="uploading" class="mr-1 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
             <Loader2 class="size-3 animate-spin" />

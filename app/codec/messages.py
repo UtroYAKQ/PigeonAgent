@@ -94,13 +94,15 @@ def _tool_return_part(
         # 再包一层 {"error": ...} 只会得到转义过的 JSON，直接还原成错误文案。
         if isinstance(error, str) and error.strip():
             content = error
-    return ToolReturnPart(
+    part = ToolReturnPart(
         tool_name=item.tool_name,
         tool_call_id=item.tool_call_id,
         content=content,
         outcome=item.outcome,
+        tool_kind=item.tool_kind,
         metadata=item.metadata,
     )
+    return ToolReturnPart.narrow_type(part)
 
 
 class _MessageBuilder:
@@ -215,16 +217,16 @@ class _MessageBuilder:
                 )
             )
         elif isinstance(item, ToolCallItem):
-            self._response_parts.append(
-                ToolCallPart(
-                    tool_name=item.tool_name,
-                    args=item.args,
-                    tool_call_id=item.tool_call_id,
-                    id=item.part_id,
-                    provider_name=item.provider_name,
-                    provider_details=item.provider_details,
-                )
+            call = ToolCallPart(
+                tool_name=item.tool_name,
+                args=item.args,
+                tool_call_id=item.tool_call_id,
+                tool_kind=item.tool_kind,
+                id=item.part_id,
+                provider_name=item.provider_name,
+                provider_details=item.provider_details,
             )
+            self._response_parts.append(ToolCallPart.narrow_type(call))
 
 
 def messages_from_items(

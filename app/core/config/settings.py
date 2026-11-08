@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     # 请求级开关（enable_web_search 等）在这层之上再收窄一次。
     feature_web_search_enabled: bool = True
     feature_image_generation_enabled: bool = True
+    # 关闭后即使管理员配了 MCP 服务器，也不会把工具下发给模型
+    feature_mcp_enabled: bool = True
     # 关闭后即使配了沙箱凭证，也不会创建云端沙箱或下发 run_command
     feature_sandbox_enabled: bool = True
 

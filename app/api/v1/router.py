@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import auth, files, health, usage
-from app.api.v1.endpoints.admin import configs, console, image_models, llm_models
+from app.api.v1.endpoints.admin import configs, console, image_models, llm_models, mcp_servers
 from app.api.v1.endpoints.chat import (
     capabilities,
     groups,
@@ -20,6 +20,7 @@ router.include_router(console.router)
 router.include_router(auth.router)
 router.include_router(llm_models.router)
 router.include_router(image_models.router)
+router.include_router(mcp_servers.router)
 router.include_router(sessions.router)
 router.include_router(groups.router)
 router.include_router(session_runs.router)

@@ -28,6 +28,7 @@ export const CONFIG_GROUP_LAYOUT: Record<AdminConfigCategory, { title: string; k
       keys: [
         'feature_web_search_enabled',
         'feature_image_generation_enabled',
+        'feature_mcp_enabled',
         'feature_sandbox_enabled',
       ],
     },

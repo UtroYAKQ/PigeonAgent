@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -41,6 +43,13 @@ class ChatSession(TimestampMixin, Base):
     has_unread: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # 当前会话选择的思考挡位；必须在模型声明的挡位里
     thinking_level: Mapped[str | None] = mapped_column(String(16))
+    # 本会话启用的管理员托管 MCP 服务器 id（字符串，避免跨方言 UUID 序列化差异）
+    mcp_server_ids: Mapped[list[str]] = mapped_column(
+        JSON().with_variant(postgresql.JSONB(), "postgresql"),
+        default=list,
+        server_default=text("'[]'"),
+        nullable=False,
+    )
     status: Mapped[str] = mapped_column(
         String(16), default="active", server_default=text("'active'")
     )

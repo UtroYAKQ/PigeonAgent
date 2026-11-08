@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Mail,
   MessagesSquare,
+  Plug,
   ScrollText,
   Search,
   SlidersHorizontal,
@@ -18,6 +19,7 @@ import {
 import AuditLogPanel from '@/components/admin/AuditLogPanel.vue'
 import ConfigSettingsPanel from '@/components/admin/ConfigSettingsPanel.vue'
 import ImageModelManagerPanel from '@/components/admin/ImageModelManagerPanel.vue'
+import McpServerManagerPanel from '@/components/admin/McpServerManagerPanel.vue'
 import ModelManagerPanel from '@/components/admin/ModelManagerPanel.vue'
 import PlatformOverviewPanel from '@/components/admin/PlatformOverviewPanel.vue'
 import SessionManagementPanel from '@/components/admin/SessionManagementPanel.vue'
@@ -34,6 +36,7 @@ export type AdminSectionKey =
   | 'site'
   | 'models'
   | 'image-models'
+  | 'mcp'
   | 'features'
   | 'deepseek'
   | 'sandbox'
@@ -127,6 +130,15 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     description: '对话里生成图片时使用的模型。配置后助手会自动获得出图能力，未配置则不显示该工具。',
     icon: Image,
     panel: ImageModelManagerPanel,
+  },
+  {
+    key: 'mcp',
+    group: '平台配置',
+    label: 'MCP 服务',
+    title: 'MCP 服务',
+    description: '管理员配置 Streamable HTTP MCP 服务器；成员在会话里按需选用，凭证不会下发给前端。',
+    icon: Plug,
+    panel: McpServerManagerPanel,
   },
   {
     key: 'features',

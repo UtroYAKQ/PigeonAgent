@@ -32,10 +32,20 @@ const TOOL_ICONS: Record<string, string> = {
   file_search: 'search',
   browse: 'globe',
   fetch_url: 'globe',
+  search_tools: 'search',
+}
+
+const MCP_TOOL_PATTERN = /^mcp_([a-z0-9_]+?)__(.+)$/
+
+function mcpToolParts(name: string): { server: string; tool: string } | null {
+  const match = MCP_TOOL_PATTERN.exec(name)
+  if (!match) return null
+  return { server: match[1]!, tool: match[2]! }
 }
 
 function toolIcon(name: string): string {
   if (TOOL_ICONS[name]) return TOOL_ICONS[name]
+  if (MCP_TOOL_PATTERN.test(name)) return 'plug'
   if (name.startsWith('fetch_')) return 'globe'
   if (name.includes('search')) return 'search'
   if (name.includes('file')) return 'file'
@@ -77,6 +87,7 @@ const TOOL_COPY: Record<string, ToolCopy> = {
   ui_open_html_preview: { running: '正在生成预览', done: '预览已生成' },
   ui_ask_user_question: { running: '正在整理问题', done: '已向你提问', paused: '提问已暂停' },
   get_current_time: { running: '正在查询当前时间', done: '已获取当前时间' },
+  search_tools: { running: '正在查找可用工具', done: '已找到可用工具' },
   load_files: { running: '正在加载文件', done: '已加载文件' },
   list_files: { running: '正在浏览工作区', done: '已浏览工作区' },
   read_file: { running: '正在读取文件', done: '已读取文件' },
@@ -85,13 +96,17 @@ const TOOL_COPY: Record<string, ToolCopy> = {
 }
 
 export function toolLabel(name: string, state: ToolState): string {
-  const human = TOOL_NAMES[name] ?? name.replace(/_/g, ' ').trim()
+  const mcp = mcpToolParts(name)
+  const human =
+    TOOL_NAMES[name]
+    ?? (mcp ? `${mcp.server} · ${mcp.tool.replace(/_/g, ' ')}` : name.replace(/_/g, ' ').trim())
   const copy = TOOL_COPY[name]
   if (state === 'interrupted') return copy?.paused ?? `已暂停 · ${human}`
   if (state === 'failed') return copy?.failed ?? `${human}失败`
 
   const running = state === 'running' || state === 'waiting'
   if (copy) return running ? copy.running : copy.done
+  if (mcp) return running ? `正在调用 ${human}` : `已调用 ${human}`
   // 后端工具名多到不可能逐个登记时，先按名字里的模式给个通用说法
   if (name.includes('search')) return running ? '正在搜索' : '搜索完成'
   if (name.startsWith('fetch_')) return running ? '正在获取外部数据' : '已获取外部数据'
@@ -132,6 +147,12 @@ function toolDetail(name: string, args: unknown): string | null {
   if (name === 'get_current_time') {
     return typeof data.timezone === 'string' ? data.timezone : null
   }
+  if (name === 'search_tools') {
+    const queries = Array.isArray(data.queries)
+      ? data.queries.filter(item => typeof item === 'string')
+      : []
+    return queries.length ? truncate(queries.join(', '), 60) : null
+  }
   if (name === 'web_search') {
     return typeof data.query === 'string' ? truncate(data.query, 60) : null
   }
@@ -147,6 +168,7 @@ export function buildToolSteps(items: RunItem[], externalResults?: Map<string, T
   const results = new Map<string, { content: unknown; outcome: ToolOutcome }>()
 
   for (const item of items) {
+    if (!item.display) continue
     if (item.type === 'tool_call') {
       calls.push({ id: item.tool_call_id, name: item.tool_name, args: item.args })
     }
