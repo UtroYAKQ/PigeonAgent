@@ -4,7 +4,13 @@ from fastapi import APIRouter, Query, status
 
 from app.api.deps import AdminUserDep, CurrentUserDep, SessionDep, SettingsDep
 from app.models.ai.llm import LlmModel
-from app.schemas.model.llm import LlmModelCreate, LlmModelList, LlmModelRead, LlmModelUpdate
+from app.schemas.model.llm import (
+    LlmModelCreate,
+    LlmModelList,
+    LlmModelProbeResult,
+    LlmModelRead,
+    LlmModelUpdate,
+)
 from app.services.admin import audit
 from app.services.model import llm as model_service
 
@@ -43,6 +49,25 @@ async def list_models(
 @router.get("/{model_id}", response_model=LlmModelRead)
 async def get_model(model_id: int, db: SessionDep, user: CurrentUserDep) -> LlmModel:
     return await model_service.get_model_or_404(db, model_id)
+
+
+@router.post("/{model_id}/test", response_model=LlmModelProbeResult)
+async def probe_model(
+    model_id: int,
+    db: SessionDep,
+    settings: SettingsDep,
+    user: AdminUserDep,
+) -> LlmModelProbeResult:
+    model = await model_service.get_model_or_404(db, model_id)
+    result = await model_service.probe_model(model, settings=settings)
+    await audit.record(
+        actor=user,
+        action=audit.MODEL_TEST,
+        target_type="model",
+        target_id=str(model.id),
+        detail={"name": model.name, "ok": result.ok, "latency_ms": result.latency_ms},
+    )
+    return result
 
 
 @router.patch("/{model_id}", response_model=LlmModelRead)

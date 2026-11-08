@@ -67,8 +67,9 @@ class ModelFactory:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
 
-    def create(self, record: LlmModel) -> ResolvedModel:
-        if not record.is_active:
+    def create(self, record: LlmModel, *, require_active: bool = True) -> ResolvedModel:
+        # 管理端探测要能测停用中的模型，正常对话仍只允许启用模型
+        if require_active and not record.is_active:
             raise UnprocessableError(f"Model '{record.name}' is not active")
         if record.provider == LlmProvider.CUSTOM.value and not record.base_url:
             raise UnprocessableError(

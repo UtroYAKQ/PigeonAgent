@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { toast } from 'vue-sonner'
-import { Check, ChevronLeft, ExternalLink, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from '@lucide/vue'
+import { Activity, Check, ChevronLeft, ExternalLink, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from '@lucide/vue'
 
 import IconPicker from '@/components/admin/IconPicker.vue'
 import LlmModelIcon from '@/components/chat/LlmModelIcon.vue'
@@ -50,6 +50,7 @@ const form = ref<ModelForm>(blankForm())
 const saving = ref(false)
 const pendingDeleteId = ref<number | null>(null)
 const deleting = ref(false)
+const testingId = ref<number | null>(null)
 const formError = ref<string | null>(null)
 const loading = ref(false)
 const loadError = ref<string | null>(null)
@@ -399,6 +400,27 @@ async function save(): Promise<void> {
   }
 }
 
+async function probe(model: LlmModel): Promise<void> {
+  if (testingId.value !== null) return
+  testingId.value = model.id
+  try {
+    const result = await modelsApi.probe(model.id)
+    if (result.ok) {
+      toast.success(`模型「${model.name}」可用 · ${result.latency_ms} ms`, {
+        description: result.output ?? '响应正常',
+      })
+    } else {
+      toast.error(`模型「${model.name}」不可用`, {
+        description: result.error ?? '未知错误',
+      })
+    }
+  } catch (error) {
+    toast.error('探测失败', { description: errorMessage(error) })
+  } finally {
+    if (testingId.value === model.id) testingId.value = null
+  }
+}
+
 async function remove(model: LlmModel): Promise<void> {
   // 管理台约定：删除走两次点击确认，不弹 window.confirm 打断页面
   if (deleting.value) return
@@ -522,6 +544,18 @@ onMounted(() => {
         </div>
 
         <div class="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="size-8 text-muted-foreground"
+            :disabled="testingId !== null"
+            aria-label="探测模型是否可用"
+            title="探测模型是否可用"
+            @click="probe(model)"
+          >
+            <Loader2 v-if="testingId === model.id" class="size-4 animate-spin" />
+            <Activity v-else class="size-4" />
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"

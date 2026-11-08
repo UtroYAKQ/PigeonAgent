@@ -119,3 +119,12 @@ class LlmModelRead(BaseModel):
 class LlmModelList(BaseModel):
     items: list[LlmModelRead]
     total: int
+
+
+class LlmModelProbeResult(BaseModel):
+    """管理端轻量探测：只验证当前配置能否完成一次极短的模型调用。"""
+
+    ok: bool
+    latency_ms: int = 0
+    output: str | None = None
+    error: str | None = None

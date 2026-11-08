@@ -2,6 +2,7 @@ import type {
   LlmModel,
   LlmModelCreatePayload,
   LlmModelList,
+  LlmModelProbeResult,
   LlmModelUpdatePayload,
 } from '@/types/api'
 import { http } from '@/lib/http'
@@ -24,5 +25,10 @@ export const modelsApi = {
 
   async remove(id: number): Promise<void> {
     await http.delete(`/models/${id}`)
+  },
+
+  async probe(id: number): Promise<LlmModelProbeResult> {
+    const { data } = await http.post<LlmModelProbeResult>(`/models/${id}/test`)
+    return data
   },
 }
