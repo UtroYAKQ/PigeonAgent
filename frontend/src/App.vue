@@ -1,21 +1,28 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { onMounted, watch, watchEffect } from 'vue'
 import type { RouteLocationNormalizedLoaded } from 'vue-router'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import { Toaster } from 'vue-sonner'
 
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import { useUiStore } from '@/stores/ui'
 
 const auth = useAuthStore()
+const site = useSiteStore()
 const ui = useUiStore()
 const router = useRouter()
 const route = useRoute()
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 onMounted(() => {
+  void site.load()
   void auth.init()
+})
+
+watchEffect(() => {
+  document.title = site.name
 })
 
 watch(

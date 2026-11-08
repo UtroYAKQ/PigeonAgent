@@ -22,6 +22,7 @@ import { useSpeechInput } from '@/composables/useSpeechInput'
 import { errorMessage } from '@/lib/http'
 import { formatBytes } from '@/lib/format'
 import { useChatStore } from '@/stores/chat'
+import { useSiteStore } from '@/stores/site'
 import { useUiStore } from '@/stores/ui'
 import type {
   DraftAttachment,
@@ -43,6 +44,7 @@ const props = withDefaults(defineProps<{ hero?: boolean; showDisclaimer?: boolea
 })
 
 const chat = useChatStore()
+const site = useSiteStore()
 const ui = useUiStore()
 const route = useRoute()
 const router = useRouter()
@@ -121,7 +123,7 @@ const placeholder = computed(() => {
   if (chat.modelsLoaded && !chat.currentModelId) return '暂无可用模型'
   if (isEditing.value) return '编辑消息…'
   if (chat.hasPendingInterrupts) return '请先处理上方的确认卡片'
-  return props.hero ? '有问题，尽管问' : '给 PigeonAgent 发送消息'
+  return props.hero ? '有问题，尽管问' : `给 ${site.name} 发送消息`
 })
 
 function animateHeight(): void {
@@ -502,7 +504,7 @@ onBeforeUnmount(() => {
         :class="isEditing ? 'opacity-0' : 'opacity-100'"
         :aria-hidden="isEditing"
       >
-        PigeonAgent 可能会犯错，请核查重要信息。
+        {{ site.name }} 可能会犯错，请核查重要信息。
       </span>
       <span
         class="absolute inset-x-0 top-0 transition-opacity duration-200"

@@ -23,6 +23,7 @@ import McpServerManagerPanel from '@/components/admin/McpServerManagerPanel.vue'
 import ModelManagerPanel from '@/components/admin/ModelManagerPanel.vue'
 import PlatformOverviewPanel from '@/components/admin/PlatformOverviewPanel.vue'
 import SessionManagementPanel from '@/components/admin/SessionManagementPanel.vue'
+import SiteSettingsPanel from '@/components/admin/SiteSettingsPanel.vue'
 import UsagePanel from '@/components/admin/UsagePanel.vue'
 import UserManagementPanel from '@/components/admin/UserManagementPanel.vue'
 import type { AdminConfigCategory } from '@/components/admin/config'
@@ -110,8 +111,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     title: '站点信息',
     description: '站点名称、简介和 Logo 会通过公开接口下发给登录页与工作区。',
     icon: Globe2,
-    panel: ConfigSettingsPanel,
-    panelProps: { category: 'site' },
+    panel: SiteSettingsPanel,
   },
   {
     key: 'models',

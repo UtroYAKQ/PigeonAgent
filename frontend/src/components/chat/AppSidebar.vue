@@ -50,6 +50,7 @@ import { errorMessage } from '@/lib/http'
 import { formatCredits } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
+import { useSiteStore } from '@/stores/site'
 import { useUiStore } from '@/stores/ui'
 import { useNameDialog } from '@/composables/useNameDialog'
 import type { ChatSession, SessionGroup } from '@/types/api'
@@ -60,6 +61,7 @@ const emit = defineEmits<{ navigate: [] }>()
 
 const auth = useAuthStore()
 const chat = useChatStore()
+const site = useSiteStore()
 const ui = useUiStore()
 const router = useRouter()
 const route = useRoute()
@@ -243,7 +245,7 @@ function logout(): void {
       <div class="flex min-w-0 flex-1 items-center gap-2.5 px-1 py-1">
         <BrandMark size="sm" />
         <span class="min-w-0 flex-1">
-          <span class="block truncate text-[13.5px] font-semibold leading-4">PigeonAgent</span>
+          <span class="block truncate text-[13.5px] font-semibold leading-4">{{ site.name }}</span>
           <span class="block truncate text-[11.5px] leading-4 text-muted-foreground">工作区</span>
         </span>
       </div>

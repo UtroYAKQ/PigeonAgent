@@ -14,11 +14,13 @@ import { isValidEmail } from '@/lib/email'
 import { errorMessage, toApiError } from '@/lib/http'
 import { validateNewPassword } from '@/lib/password'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 import { useUiStore } from '@/stores/ui'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const site = useSiteStore()
 const ui = useUiStore()
 
 const mode = ref<'login' | 'register'>(route.meta.register ? 'register' : 'login')
@@ -212,11 +214,14 @@ onUnmounted(() => {
 
       <div class="relative z-10 flex items-center gap-2.5 text-sm font-semibold">
         <BrandMark size="sm" />
-        <span>PigeonAgent</span>
+        <span>{{ site.name }}</span>
       </div>
 
       <div class="relative z-10 my-auto flex justify-center py-14 min-[1280px]:py-10">
-        <PixelWordmark class="h-[clamp(60px,12vh,116px)] w-full max-w-[680px]" />
+        <PixelWordmark
+          :text="site.name.toUpperCase()"
+          class="h-[clamp(60px,12vh,116px)] w-full max-w-[680px]"
+        />
       </div>
     </aside>
 

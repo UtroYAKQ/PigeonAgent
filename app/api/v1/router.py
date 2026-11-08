@@ -1,7 +1,14 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import auth, files, health, usage
-from app.api.v1.endpoints.admin import configs, console, image_models, llm_models, mcp_servers
+from app.api.v1.endpoints.admin import (
+    configs,
+    console,
+    image_models,
+    llm_models,
+    mcp_servers,
+    site,
+)
 from app.api.v1.endpoints.chat import (
     capabilities,
     groups,
@@ -16,6 +23,7 @@ router = APIRouter()
 router.include_router(health.router, tags=["health"])
 router.include_router(capabilities.router)
 router.include_router(configs.router)
+router.include_router(site.router)
 router.include_router(console.router)
 router.include_router(auth.router)
 router.include_router(llm_models.router)

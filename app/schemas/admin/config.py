@@ -44,3 +44,7 @@ class PublicConfigRead(BaseModel):
     site_logo_url: str | None
     web_search_enabled: bool
     email_verification_enabled: bool
+
+
+class SiteLogoRead(BaseModel):
+    site_logo_url: str

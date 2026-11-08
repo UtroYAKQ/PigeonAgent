@@ -6,12 +6,14 @@ import BrandMark from '@/components/brand/BrandMark.vue'
 import { Button } from '@/components/ui/button'
 import type { ErrorActionKind } from '@/lib/errorPages'
 import { resolveErrorPage } from '@/lib/errorPages'
+import { useSiteStore } from '@/stores/site'
 
 const props = withDefaults(defineProps<{ code?: string }>(), {
   code: '404',
 })
 
 const router = useRouter()
+const site = useSiteStore()
 const page = computed(() => resolveErrorPage(props.code))
 
 const driftDots = [
@@ -40,10 +42,10 @@ function runAction(kind: ErrorActionKind): void {
       <RouterLink
         to="/"
         class="inline-flex items-center gap-2.5 rounded-md text-sm font-semibold text-foreground transition-opacity hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        aria-label="Back to PigeonAgent workspace"
+        :aria-label="`Back to ${site.name} workspace`"
       >
         <BrandMark size="sm" />
-        PigeonAgent
+        {{ site.name }}
       </RouterLink>
     </header>
 

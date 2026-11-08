@@ -9,9 +9,11 @@ import TurnShell from '@/components/turn/TurnShell.vue'
 import { errorMessage } from '@/lib/http'
 import { formatDateTime } from '@/lib/format'
 import { buildTurnView } from '@/lib/turnModel'
+import { useSiteStore } from '@/stores/site'
 import type { SessionRun, SharedConversation } from '@/types/api'
 
 const route = useRoute()
+const site = useSiteStore()
 
 const token = computed(() => String(route.params.token ?? ''))
 const conversation = ref<SharedConversation | null>(null)
@@ -26,7 +28,7 @@ const turns = computed(() =>
   runs.value.map(run => ({ run, view: buildTurnView(run, null) })),
 )
 
-const siteName = 'PigeonAgent'
+const siteName = computed(() => site.name)
 
 let robots: HTMLMetaElement | null = null
 
@@ -41,7 +43,7 @@ function setRobots(): void {
 function clearRobots(): void {
   robots?.remove()
   robots = null
-  document.title = siteName
+  document.title = siteName.value
 }
 
 async function load(): Promise<void> {
@@ -52,7 +54,7 @@ async function load(): Promise<void> {
     conversation.value = result
     runs.value = result.runs
     hasMore.value = result.has_more
-    document.title = `${result.session.title || '分享的对话'} · ${siteName}`
+    document.title = `${result.session.title || '分享的对话'} · ${siteName.value}`
   } catch (caught) {
     failure.value = errorMessage(caught)
   } finally {

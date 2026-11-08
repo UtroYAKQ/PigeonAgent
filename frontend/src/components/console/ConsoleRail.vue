@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import type { ConsoleNavItem } from '@/components/console/types'
 import { useAuthStore } from '@/stores/auth'
+import { useSiteStore } from '@/stores/site'
 
 const props = withDefaults(
   defineProps<{
@@ -41,6 +42,7 @@ const emit = defineEmits<{
 }>()
 
 const auth = useAuthStore()
+const site = useSiteStore()
 const router = useRouter()
 const navRef = ref<HTMLElement | null>(null)
 
@@ -103,7 +105,7 @@ function logout(): void {
       <div class="flex min-w-0 flex-1 items-center gap-2.5 px-1 py-1">
         <BrandMark size="sm" />
         <span class="min-w-0 flex-1">
-          <span class="block truncate text-[13.5px] font-semibold leading-4">PigeonAgent</span>
+          <span class="block truncate text-[13.5px] font-semibold leading-4">{{ site.name }}</span>
           <span class="block truncate text-[11.5px] leading-4 text-muted-foreground">{{ title }}</span>
         </span>
       </div>

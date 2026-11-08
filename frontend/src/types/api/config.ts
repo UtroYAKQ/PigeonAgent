@@ -26,3 +26,15 @@ export interface AppConfigList {
   items: AppConfigItem[]
   total: number
 }
+
+export interface PublicConfig {
+  site_name: string
+  site_description: string
+  site_logo_url: string | null
+  web_search_enabled: boolean
+  email_verification_enabled: boolean
+}
+
+export interface SiteLogoRead {
+  site_logo_url: string
+}
