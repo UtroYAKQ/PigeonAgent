@@ -165,9 +165,7 @@ class SandboxWorkspace(RunWorkspace):
                         succeed(index, len(data))
             return [entry for entry in results if entry is not None]
 
-        return await _materialize_load_batch(
-            db, file_ids, owner_id, persist_many=persist_many
-        )
+        return await _materialize_load_batch(db, file_ids, owner_id, persist_many=persist_many)
 
     async def put_file(self, name: str, content: str, *, append: bool = False) -> dict[str, Any]:
         self._mark()
@@ -180,9 +178,7 @@ class SandboxWorkspace(RunWorkspace):
         if append:
             await self._append_bytes(sandbox, target, data, name)
         else:
-            await sandbox.files.write(
-                target, data, request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS
-            )
+            await sandbox.files.write(target, data, request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS)
         return {"saved_as": pure.as_posix(), "size": len(data), "append": append}
 
     async def _append_bytes(
@@ -227,10 +223,9 @@ class SandboxWorkspace(RunWorkspace):
         """在沙箱里用 awk 只取目标行，不再把整份文件拉回后端。"""
         start = max(1, offset)
         end = start - 1 + max(1, limit)
-        program = "NR>=s && NR<=e {print} END {printf \"__PIGEON_TOTAL__%d\\n\", NR}"
+        program = 'NR>=s && NR<=e {print} END {printf "__PIGEON_TOTAL__%d\\n", NR}'
         command = (
-            f"LC_ALL=C awk -v s={start} -v e={end} "
-            f"{shlex.quote(program)} {shlex.quote(target)}"
+            f"LC_ALL=C awk -v s={start} -v e={end} {shlex.quote(program)} {shlex.quote(target)}"
         )
         result: Any = None
         try:
@@ -417,9 +412,7 @@ class SandboxWorkspace(RunWorkspace):
     async def run_script(self, code: str, timeout_seconds: int = 120) -> dict[str, Any]:
         self._mark()
         sandbox = await self._ensure_sandbox()
-        return await self._run_shell(
-            sandbox, f"python3 -c {shlex.quote(code)}", timeout_seconds
-        )
+        return await self._run_shell(sandbox, f"python3 -c {shlex.quote(code)}", timeout_seconds)
 
     async def _run_shell(
         self, sandbox: AsyncSandbox, command: str, timeout_seconds: int

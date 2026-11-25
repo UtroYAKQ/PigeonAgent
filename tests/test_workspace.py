@@ -386,9 +386,7 @@ class _FakeCommands:
 
     def _awk(self, command: str) -> Any:
         tokens = shlex.split(command)
-        options = {
-            token[0]: int(token[2:]) for token in tokens if token.startswith(("s=", "e="))
-        }
+        options = {token[0]: int(token[2:]) for token in tokens if token.startswith(("s=", "e="))}
         assert self._files is not None
         data = self._files.written.get(tokens[-1])
         if data is None:

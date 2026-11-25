@@ -112,9 +112,7 @@ def workspace_tools(
             max_results: 最多返回多少条命中，1~50，默认 50。
         """
         try:
-            result = await workspace.grep_files(
-                pattern, subdir, glob, max_results=max_results
-            )
+            result = await workspace.grep_files(pattern, subdir, glob, max_results=max_results)
         except Exception as exc:
             return _fail("grep_files", exc)
         return result

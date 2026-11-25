@@ -134,9 +134,7 @@ class LocalWorkspace(RunWorkspace):
         base_dir = self.root / Path(*pure.parts)
         if not base_dir.is_dir():
             return {"error": f"{subdir} 不是工作区里的目录"}
-        entries = await asyncio.to_thread(
-            _list_children, self.root, base_dir, pattern, recursive
-        )
+        entries = await asyncio.to_thread(_list_children, self.root, base_dir, pattern, recursive)
         return {
             "directory": pure.as_posix(),
             "entries": entries[:_MAX_LIST_ENTRIES],
