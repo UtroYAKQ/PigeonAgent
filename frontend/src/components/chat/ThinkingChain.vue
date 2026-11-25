@@ -6,6 +6,7 @@ import { formatDuration } from '@/lib/format'
 import type { ToolStep } from '@/lib/tools'
 import type { ChainEntry } from '@/lib/turnModel'
 import type { RunStatus } from '@/types/api'
+import MarkdownMessage from './MarkdownMessage.vue'
 import SonarDot from './SonarDot.vue'
 
 const ToolOutput = defineAsyncComponent({
@@ -247,10 +248,13 @@ watch(
               <div
                 v-show="!isReasoningCollapsed(entry.id)"
                 :ref="element => setReasoningBox(entry.id, element)"
-                class="mt-1.5 max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words pr-1 text-[13.5px] leading-[1.72] text-muted-foreground/90"
+                class="reasoning-markdown mt-1.5 max-h-[320px] overflow-y-auto break-words pr-1"
                 @scroll="onReasoningScroll(entry.id, $event)"
               >
-                {{ entry.text }}
+                <MarkdownMessage
+                  :content="entry.text"
+                  :streaming="isStreaming && entry.streaming"
+                />
               </div>
             </template>
 
@@ -297,3 +301,24 @@ watch(
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 复用正文 Markdown，只在推理区收小字号并保持弱化颜色。 */
+.reasoning-markdown :deep(.markdown) {
+  font-size: 13.5px;
+  line-height: 1.72;
+  color: var(--muted-foreground);
+}
+
+.reasoning-markdown :deep(.markdown .markstream-vue) {
+  --ms-text-body: 13.5px;
+  --ms-leading-body: 1.72;
+}
+
+.reasoning-markdown :deep(.markdown h1),
+.reasoning-markdown :deep(.markdown h2),
+.reasoning-markdown :deep(.markdown h3),
+.reasoning-markdown :deep(.markdown h4) {
+  color: inherit;
+}
+</style>
