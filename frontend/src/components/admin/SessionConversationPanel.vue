@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { AlertTriangle, ArrowLeft, Loader2, Radio, RefreshCw } from '@lucide/vue'
 
 import { adminApi } from '@/api/admin'
-import ReadOnlyTurn from '@/components/chat/ReadOnlyTurn.vue'
+import TurnShell from '@/components/turn/TurnShell.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/lib/http'
@@ -294,12 +294,21 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="historyTurns.length || liveTurn" class="flex flex-col gap-10 py-2">
-        <ReadOnlyTurn v-for="turn in historyTurns" :key="turn.run.id" :view="turn.view" />
-        <ReadOnlyTurn
+        <TurnShell
+          v-for="turn in historyTurns"
+          :key="turn.run.id"
+          :run="turn.run"
+          :view="turn.view"
+          mode="readonly"
+          show-user
+        />
+        <TurnShell
           v-if="liveTurn"
           :key="liveTurn.run.id"
+          :run="liveTurn.run"
           :view="liveTurn.view"
-          :streaming="liveStreaming"
+          mode="readonly"
+          show-user
         />
       </div>
       <div v-else class="py-14 text-center text-sm text-muted-foreground">这个会话还没有消息。</div>

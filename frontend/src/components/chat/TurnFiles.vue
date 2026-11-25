@@ -35,6 +35,7 @@ function displayName(item: ArtifactMedia): string {
         :media-type="item.mediaType"
         :file-id="item.fileId"
         :data="item.data"
+        previewable
       />
     </div>
   </section>

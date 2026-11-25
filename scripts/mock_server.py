@@ -450,17 +450,6 @@ async def respond(messages: list[ModelMessage], _info: AgentInfo) -> ModelRespon
     return ModelResponse(parts=[TextPart(reply)])
 
 
-def _preview_html() -> str:
-    color = f"#{random.randint(0, 0xFFFFFF):06x}"
-    return (
-        "<style>body{font:14px/1.6 system-ui;margin:24px}"
-        f"b{{color:{color}}}</style>"
-        "<h3>Mock 预览</h3>"
-        f"<p>主色 <b>{color}</b>，随机数 {random.randint(10, 99)}。</p>"
-        '<button onclick="this.textContent+=1">点我 +1</button>'
-    )
-
-
 TEST_CHAIN: tuple[str, ...] = (
     "先把这条验收拆成可核对的四件事：思维链本身、联网搜索、沙箱执行、UI 预览。",
     "再加一段长代码块，看 markdown 渲染在高亮和展开上都还站得住。",
@@ -507,7 +496,7 @@ def _test_call(name: str) -> DeltaToolCall:
     )
 
 
-TEST_STEPS = ("web_search", "run_command", "ui_open_html_preview")
+TEST_STEPS = ("web_search", "run_command")
 
 
 def _sandbox_output(command: str) -> str:
@@ -716,18 +705,6 @@ async def respond_stream(messages: list[ModelMessage], _info: AgentInfo):
                 json_args=json.dumps({"symbol": "BTC"}),
                 tool_call_id=f"call_external_{uuid4().hex[:8]}",
             ),
-        }
-        return
-    if not _has_tool_result(messages) and "预览" in text:
-        yield {
-            0: DeltaToolCall(
-                name="ui_open_html_preview",
-                json_args=json.dumps(
-                    {"title": f"随机预览 #{uuid4().hex[:4]}", "html": _preview_html()},
-                    ensure_ascii=False,
-                ),
-                tool_call_id=f"call_preview_{uuid4().hex[:8]}",
-            )
         }
         return
     if not _has_tool_result(messages) and ("图表" in text or "图片" in text):

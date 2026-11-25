@@ -7,11 +7,13 @@ import { randomUuid } from '@/lib/ids'
 import type { PanelTab, PanelTabInput } from '@/types/panel'
 import type { UUID } from '@/types/api'
 
-export interface PreviewInput {
+export interface FileOpenInput {
   sessionId: UUID
-  toolCallId: string
   title: string
-  html: string
+  fileId: string
+  mediaType?: string | null
+  size?: number | null
+  sourceId?: string
 }
 
 export const usePanelStore = defineStore('panel', () => {
@@ -36,14 +38,26 @@ export const usePanelStore = defineStore('panel', () => {
     return tab.id
   }
 
-  /** 预览面板：HTML 直接进 iframe，源码另开一个 code 标签。 */
-  function openPreview(next: PreviewInput): void {
-    openTab({
+  /** 同一个文件重复点预览时回到已有标签，不叠出一排同名 tab。 */
+  function openFile(next: FileOpenInput): string {
+    const existing = tabs.value.find(tab => (
+      tab.sessionId === next.sessionId
+      && tab.type === 'file'
+      && tab.fileId === next.fileId
+    ))
+    if (existing) {
+      activeTabId.value = existing.id
+      return existing.id
+    }
+    return openTab({
       sessionId: next.sessionId,
-      type: 'html',
+      type: 'file',
       title: next.title,
-      content: next.html,
-      sourceId: next.toolCallId,
+      content: '',
+      fileId: next.fileId,
+      mediaType: next.mediaType ?? null,
+      size: next.size ?? null,
+      sourceId: next.sourceId,
     })
   }
 
@@ -81,7 +95,7 @@ export const usePanelStore = defineStore('panel', () => {
     tabsOf,
     activeTab,
     openTab,
-    openPreview,
+    openFile,
     selectTab,
     closeTab,
     closeTabs,

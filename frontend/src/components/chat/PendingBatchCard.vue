@@ -8,12 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { errorMessage } from '@/lib/http'
 import { parseJsonLike, stringifyValue } from '@/lib/format'
-import {
-  askQuestions,
-  isPreviewTool,
-  type PendingBatch,
-  type PendingTool,
-} from '@/lib/pending'
+import { askQuestions, type PendingBatch, type PendingTool } from '@/lib/pending'
 import { askAnswersPayload, type AskQuestion } from '@/lib/frontendTools'
 import { useChatStore } from '@/stores/chat'
 
@@ -36,13 +31,8 @@ const askItems = computed(() =>
       Boolean(item.questions),
     ),
 )
-const previewTools = computed(() =>
-  props.batch.pendingCalls.filter(tool => isPreviewTool(tool.toolName)),
-)
 const externalTools = computed(() =>
-  props.batch.pendingCalls.filter(
-    tool => !isPreviewTool(tool.toolName) && !askQuestions(tool),
-  ),
+  props.batch.pendingCalls.filter(tool => !askQuestions(tool)),
 )
 
 const title = computed(() => {
@@ -223,11 +213,6 @@ async function submit(): Promise<void> {
       chosen[item.tool.toolCallId] ?? {},
     )
   }
-  // 预览调用不再显示单独按钮，继续时一并回填，避免批次卡在未决状态。
-  for (const tool of previewTools.value) {
-    calls[tool.toolCallId] = { opened: true }
-  }
-
   submitting.value = true
   error.value = null
   try {

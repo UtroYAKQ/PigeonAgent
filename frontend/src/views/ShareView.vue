@@ -5,7 +5,7 @@ import { AlertTriangle, Loader2, Lock } from '@lucide/vue'
 
 import { sharesApi } from '@/api/shares'
 import BrandMark from '@/components/brand/BrandMark.vue'
-import ReadOnlyTurn from '@/components/chat/ReadOnlyTurn.vue'
+import TurnShell from '@/components/turn/TurnShell.vue'
 import { errorMessage } from '@/lib/http'
 import { formatDateTime } from '@/lib/format'
 import { buildTurnView } from '@/lib/turnModel'
@@ -148,7 +148,14 @@ onBeforeUnmount(clearRobots)
         </div>
 
         <div class="flex flex-col gap-10">
-          <ReadOnlyTurn v-for="turn in turns" :key="turn.run.id" :view="turn.view" />
+          <TurnShell
+            v-for="turn in turns"
+            :key="turn.run.id"
+            :run="turn.run"
+            :view="turn.view"
+            mode="readonly"
+            show-user
+          />
         </div>
 
         <footer class="mt-14 border-t border-border pt-5 text-[12px] leading-6 text-muted-foreground">

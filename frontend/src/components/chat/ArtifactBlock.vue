@@ -160,6 +160,7 @@ onBeforeUnmount(() => {
         :media-type="item.mediaType"
         :file-id="item.fileId"
         :data="item.data"
+        previewable
       />
     </div>
 

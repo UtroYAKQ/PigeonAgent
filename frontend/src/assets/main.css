@@ -725,7 +725,8 @@
 }
 
 .md-code__copy,
-.md-code__expand {
+.md-code__expand,
+.md-code__preview {
   display: inline-flex;
   height: 24px;
   align-items: center;
@@ -739,7 +740,8 @@
 }
 
 .md-code__copy:hover,
-.md-code__expand:hover {
+.md-code__expand:hover,
+.md-code__preview:hover {
   background: var(--surface-strong);
   color: var(--foreground);
 }

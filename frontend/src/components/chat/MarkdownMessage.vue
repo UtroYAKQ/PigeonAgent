@@ -62,6 +62,20 @@ async function onClick(event: MouseEvent): Promise<void> {
   const target = event.target
   if (!(target instanceof Element)) return
 
+  const previewButton = target.closest('.md-code__preview')
+  if (previewButton) {
+    const container = previewButton.closest('.md-code')
+    const code = container?.querySelector('pre')?.textContent ?? ''
+    if (!code || !chat.currentSessionId) return
+    panels.openTab({
+      sessionId: chat.currentSessionId,
+      type: 'html',
+      title: 'HTML 预览',
+      content: code,
+    })
+    return
+  }
+
   const expandButton = target.closest('.md-code__expand')
   if (expandButton) {
     const container = expandButton.closest('.md-code')

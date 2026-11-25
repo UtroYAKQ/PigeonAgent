@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject } from 'vue'
 
 import { highlightCode, highlightEpoch } from '@/lib/highlighter'
+import { PANEL_HOST_KEY } from '@/lib/panelHost'
 
 interface CodeBlockNode {
   language?: string
@@ -23,6 +24,10 @@ const language = computed(() => {
 })
 
 const streaming = computed(() => props.node.loading === true || props.loading === true)
+const panelHost = inject(PANEL_HOST_KEY, false)
+const canPreview = computed(() => (
+  panelHost && (language.value === 'html' || language.value === 'htm')
+))
 
 const bodyHtml = computed(() => {
   // 语法按需加载完成后重新高亮
@@ -37,6 +42,16 @@ const bodyHtml = computed(() => {
     <div class="md-code__header">
       <span>{{ language }}</span>
       <div class="md-code__actions">
+        <button
+          v-if="canPreview"
+          type="button"
+          class="md-code__preview"
+          data-preview-html
+          aria-label="预览 HTML"
+          title="预览 HTML"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="2.6" /></svg>
+        </button>
         <button
           type="button"
           class="md-code__expand"

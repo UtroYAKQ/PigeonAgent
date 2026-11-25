@@ -5,6 +5,7 @@ import type { BundledLanguage } from 'shiki'
 import { CodeBlock } from '@/components/ai-elements/code-block'
 import { guardPreviewDocument } from '@/lib/previewDocument'
 import type { PanelTab } from '@/types/panel'
+import FileViewer from './FileViewer.vue'
 import MarkdownMessage from './MarkdownMessage.vue'
 
 const props = defineProps<{ tab: PanelTab }>()
@@ -22,14 +23,13 @@ const previewSrcdoc = computed(() =>
     :srcdoc="previewSrcdoc"
     sandbox="allow-scripts"
     referrerpolicy="no-referrer"
-    class="h-full w-full rounded-xl border border-border bg-white"
+    class="h-full w-full bg-white"
     :title="tab.title"
   />
 
-  <div
-    v-else-if="tab.type === 'code'"
-    class="h-full overflow-hidden rounded-xl border border-border bg-code"
-  >
+  <FileViewer v-else-if="tab.type === 'file' && tab.fileId" :tab="tab" />
+
+  <div v-else-if="tab.type === 'code'" class="h-full overflow-hidden bg-code">
     <CodeBlock
       :code="tab.content"
       :language="codeLanguage"
@@ -38,7 +38,7 @@ const previewSrcdoc = computed(() =>
     />
   </div>
 
-  <div v-else class="h-full overflow-y-auto rounded-xl border border-border bg-background px-6 py-5">
+  <div v-else class="h-full overflow-y-auto bg-background px-6 py-5">
     <MarkdownMessage :content="tab.content" />
   </div>
 </template>

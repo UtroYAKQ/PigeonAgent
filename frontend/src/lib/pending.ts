@@ -1,6 +1,6 @@
 import type { SessionRun, ToolCallItem, ToolResultItem } from '@/types/api'
-import type { AskQuestion, PreviewPayload } from './frontendTools'
-import { ASK_TOOL, PREVIEW_TOOL, parseAskArgs, parsePreviewArgs } from './frontendTools'
+import type { AskQuestion } from './frontendTools'
+import { ASK_TOOL, parseAskArgs } from './frontendTools'
 
 export interface PendingTool {
   toolCallId: string
@@ -82,15 +82,6 @@ export function buildPendingBatches(
   })
 }
 
-export function previewPayload(tool: PendingTool): PreviewPayload | null {
-  if (tool.toolName !== PREVIEW_TOOL) return null
-  return parsePreviewArgs(tool.args)
-}
-
-export function isPreviewTool(name: string): boolean {
-  return name === PREVIEW_TOOL
-}
-
 function isAskTool(name: string): boolean {
   return name === ASK_TOOL
 }
@@ -99,10 +90,4 @@ function isAskTool(name: string): boolean {
 export function askQuestions(tool: PendingTool): AskQuestion[] | null {
   if (!isAskTool(tool.toolName)) return null
   return parseAskArgs(tool.args)
-}
-
-export function isPreviewOnlyBatch(batch: PendingBatch): boolean {
-  return batch.pendingApprovals.length === 0
-    && batch.pendingCalls.length > 0
-    && batch.pendingCalls.every(tool => isPreviewTool(tool.toolName))
 }

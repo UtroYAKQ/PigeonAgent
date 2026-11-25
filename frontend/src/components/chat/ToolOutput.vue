@@ -1,12 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BundledLanguage, SpecialLanguage } from 'shiki'
-import { ExternalLink, Maximize2 } from '@lucide/vue'
 
 import { CodeBlock, CodeBlockHeader } from '@/components/ai-elements/code-block'
-import { TooltipHint } from '@/components/ui/tooltip'
-import { formatHtml } from '@/lib/code'
-import { PREVIEW_TOOL, parsePreviewArgs } from '@/lib/frontendTools'
 import { parseJsonLike, stringifyValue } from '@/lib/format'
 import {
   commandFromStep,
@@ -15,43 +11,12 @@ import {
   terminalFromStep,
   type ToolStep,
 } from '@/lib/tools'
-import { useChatStore } from '@/stores/chat'
-import { usePanelStore } from '@/stores/panel'
 import AuthMedia from './AuthMedia.vue'
 import FileAttachment from './FileAttachment.vue'
 import TerminalPanel from './TerminalPanel.vue'
 import ToolCodeCopy from './ToolCodeCopy.vue'
 
 const props = defineProps<{ step: ToolStep }>()
-const chat = useChatStore()
-const panels = usePanelStore()
-
-const preview = computed(() =>
-  props.step.name === PREVIEW_TOOL ? parsePreviewArgs(props.step.args) : null,
-)
-const previewHtml = computed(() => (preview.value ? formatHtml(preview.value.html) : ''))
-
-function openPreview(): void {
-  if (!preview.value || !chat.currentSessionId) return
-  panels.openPreview({
-    sessionId: chat.currentSessionId,
-    toolCallId: props.step.id,
-    title: preview.value.title,
-    html: preview.value.html,
-  })
-}
-
-function openSource(): void {
-  if (!preview.value || !chat.currentSessionId) return
-  panels.openTab({
-    sessionId: chat.currentSessionId,
-    type: 'code',
-    title: `${preview.value.title} · 源码`,
-    content: previewHtml.value,
-    language: 'html',
-    sourceId: props.step.id,
-  })
-}
 
 const command = computed(() => commandFromStep(props.step))
 const terminal = computed(() => terminalFromStep(props.step))
@@ -177,45 +142,6 @@ const args = computed(() => {
 
 <template>
   <div class="space-y-2">
-    <div
-      v-if="preview"
-      class="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface/60 px-3 py-2"
-    >
-      <span class="grid size-7 shrink-0 place-items-center rounded-md border border-border bg-background text-muted-foreground">
-        <Maximize2 class="size-3.5" />
-      </span>
-      <div class="min-w-0 flex-1">
-        <p class="truncate text-[12.5px] font-medium text-foreground">{{ preview.title || '页面预览' }}</p>
-        <p class="text-[11px] text-muted-foreground">HTML 页面 · 在预览面板查看</p>
-      </div>
-      <div class="flex shrink-0 items-center gap-1">
-        <TooltipHint text="在侧栏展开 HTML 源码">
-          <button
-            type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:bg-surface hover:text-foreground"
-            aria-label="在侧栏展开 HTML 源码"
-            @click="openSource"
-          >
-            <Maximize2 class="size-3" />
-            源码
-          </button>
-        </TooltipHint>
-        <TooltipHint text="打开页面预览">
-          <button
-            type="button"
-            class="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:bg-surface hover:text-foreground"
-            aria-label="打开页面预览"
-            @click="openPreview"
-          >
-            <ExternalLink class="size-3" />
-            预览
-          </button>
-        </TooltipHint>
-        <ToolCodeCopy :code="previewHtml" />
-      </div>
-    </div>
-
-    <template v-else>
     <CodeBlock
       v-if="command"
       :code="command"
@@ -253,6 +179,7 @@ const args = computed(() => {
           :size="item.size"
           :media-type="item.mediaType"
           :file-id="item.fileId"
+          previewable
         />
       </template>
     </div>
@@ -305,6 +232,5 @@ const args = computed(() => {
         <ToolCodeCopy :code="args ?? ''" />
       </CodeBlockHeader>
     </CodeBlock>
-    </template>
   </div>
 </template>

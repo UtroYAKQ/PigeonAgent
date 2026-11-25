@@ -1,24 +1,9 @@
 import type { FrontendToolDecl } from '@/types/api'
 import { parseJsonLike } from './format'
 
-export const PREVIEW_TOOL = 'ui_open_html_preview'
 export const ASK_TOOL = 'ui_ask_user_question'
 
 export const FRONTEND_TOOLS: FrontendToolDecl[] = [
-  {
-    name: PREVIEW_TOOL,
-    description:
-      '在当前对话右侧的预览面板打开或更新一段 HTML。用于展示网页、图表、交互原型或其他可视化结果。'
-      + '单次传入的 HTML 不宜过长；内容多时先出骨架，再分次调用更新，避免超出单次输出上限。',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string' },
-        html: { type: 'string' },
-      },
-      required: ['html'],
-    },
-  },
   {
     name: ASK_TOOL,
     description:
@@ -57,22 +42,6 @@ export const FRONTEND_TOOLS: FrontendToolDecl[] = [
     },
   },
 ]
-
-export interface PreviewPayload {
-  title: string
-  html: string
-}
-
-export function parsePreviewArgs(args: unknown): PreviewPayload | null {
-  const value = parseJsonLike(args)
-  if (!value || typeof value !== 'object') return null
-  const data = value as Record<string, unknown>
-  if (typeof data.html !== 'string' || !data.html.trim()) return null
-  return {
-    title: typeof data.title === 'string' && data.title.trim() ? data.title.trim() : '页面预览',
-    html: data.html,
-  }
-}
 
 export interface AskOption {
   label: string

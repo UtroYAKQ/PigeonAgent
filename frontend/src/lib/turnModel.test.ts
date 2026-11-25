@@ -49,9 +49,9 @@ function liveRun(blocks: LiveRun['blocks'], finished = false): LiveRun {
 }
 
 function chainTexts(view: ReturnType<typeof buildTurnView>): string[] {
-  return view.segments.flatMap(segment => (
-    segment.kind === 'chain'
-      ? segment.entries.flatMap(entry => (entry.kind === 'reasoning' ? [entry.text] : []))
+  return view.blocks.flatMap(block => (
+    block.type === 'chain'
+      ? block.entries.flatMap(entry => (entry.kind === 'reasoning' ? [entry.text] : []))
       : []
   ))
 }
@@ -83,7 +83,7 @@ describe('buildTurnView', () => {
     )
 
     expect(view.userText).toBe('你好')
-    expect(view.segments.map(segment => segment.kind)).toEqual(['chain', 'text'])
+    expect(view.blocks.map(block => block.type)).toEqual(['chain', 'text'])
     expect(chainTexts(view)).toEqual(['先想一想'])
     expect(view.assistantText).toBe('完成')
     expect(view.steps).toHaveLength(1)
@@ -133,10 +133,10 @@ describe('buildTurnView', () => {
       null,
     )
 
-    expect(view.segments).toHaveLength(2)
-    const [chain] = view.segments
-    expect(chain?.kind).toBe('chain')
-    expect(chain?.kind === 'chain' ? chain.entries.map(entry => entry.kind) : []).toEqual([
+    expect(view.blocks).toHaveLength(2)
+    const [chain] = view.blocks
+    expect(chain?.type).toBe('chain')
+    expect(chain?.type === 'chain' ? chain.entries.map(entry => entry.kind) : []).toEqual([
       'reasoning',
       'tool',
       'reasoning',
@@ -188,14 +188,14 @@ describe('buildTurnView', () => {
       null,
     )
 
-    expect(view.segments.map(segment => segment.kind)).toEqual([
+    expect(view.blocks.map(block => block.type)).toEqual([
       'chain',
       'text',
       'chain',
       'text',
     ])
     expect(chainTexts(view)).toEqual(['第一段推理', '第二段推理'])
-    const texts = view.segments.flatMap(segment => (segment.kind === 'text' ? [segment.text] : []))
+    const texts = view.blocks.flatMap(block => (block.type === 'text' ? [block.text] : []))
     expect(texts).toEqual(['中间回答', '最终回答'])
     expect(view.assistantText).toBe('中间回答\n\n最终回答')
   })
@@ -211,11 +211,11 @@ describe('buildTurnView', () => {
 
     expect(view.status).toBe('streaming')
     expect(view.assistantText).toBe('流式')
-    expect(view.segments.map(segment => segment.kind)).toEqual(['text', 'chain'])
-    expect(view.segments[0]?.kind === 'text' ? view.segments[0].streaming : null).toBe(false)
-    const chain = view.segments[1]
-    expect(chain?.kind).toBe('chain')
-    if (chain?.kind === 'chain') {
+    expect(view.blocks.map(block => block.type)).toEqual(['text', 'chain'])
+    expect(view.blocks[0]?.type === 'text' ? view.blocks[0].streaming : null).toBe(false)
+    const chain = view.blocks[1]
+    expect(chain?.type).toBe('chain')
+    if (chain?.type === 'chain') {
       expect(chain.streaming).toBe(true)
       expect(chain.entries[0]?.kind === 'reasoning' ? chain.entries[0].text : null).toBe('思考')
     }
@@ -268,9 +268,9 @@ describe('buildTurnView', () => {
       ]),
     )
 
-    expect(view.segments).toHaveLength(1)
-    const [chain] = view.segments
-    expect(chain?.kind === 'chain' ? chain.entries.map(entry => entry.kind) : []).toEqual([
+    expect(view.blocks).toHaveLength(1)
+    const [chain] = view.blocks
+    expect(chain?.type === 'chain' ? chain.entries.map(entry => entry.kind) : []).toEqual([
       'reasoning',
       'tool',
       'reasoning',
@@ -301,16 +301,16 @@ describe('buildTurnView', () => {
       ]),
     )
 
-    expect(view.segments.map(segment => segment.kind)).toEqual([
+    expect(view.blocks.map(block => block.type)).toEqual([
       'chain',
       'text',
       'chain',
       'text',
     ])
     expect(view.assistantText).toBe('中间回答\n\n最终回答')
-    expect(view.segments[1]?.kind === 'text' ? view.segments[1].streaming : null).toBe(false)
-    expect(view.segments[2]?.kind === 'chain' ? view.segments[2].streaming : null).toBe(false)
-    expect(view.segments[3]?.kind === 'text' ? view.segments[3].streaming : null).toBe(true)
+    expect(view.blocks[1]?.type === 'text' ? view.blocks[1].streaming : null).toBe(false)
+    expect(view.blocks[2]?.type === 'chain' ? view.blocks[2].streaming : null).toBe(false)
+    expect(view.blocks[3]?.type === 'text' ? view.blocks[3].streaming : null).toBe(true)
   })
 
   it('marks unfinished steps interrupted when the run was cancelled', () => {
@@ -366,13 +366,14 @@ describe('buildTurnView', () => {
     expect(merged.steps[0]?.name).toBe('ui_open_html_preview')
     expect(merged.steps[0]?.state).toBe('success')
     expect(merged.steps[0]?.label).toBe('预览已生成')
-    const toolEntries = merged.segments.flatMap(segment => (
-      segment.kind === 'chain'
-        ? segment.entries.filter(entry => entry.kind === 'tool')
+    const toolEntries = merged.blocks.flatMap(block => (
+      block.type === 'chain'
+        ? block.entries.filter(entry => entry.kind === 'tool')
         : []
     ))
     expect(toolEntries).toHaveLength(1)
     expect(toolEntries[0]?.kind === 'tool' ? toolEntries[0].step.state : null).toBe('success')
+    expect(toolEntries[0]?.kind === 'tool' ? toolEntries[0].step.label : null).toBe('预览已生成')
   })
 
   it('never leaves unfinished tools running after the run is over', () => {
@@ -436,14 +437,14 @@ describe('buildTurnView', () => {
       null,
     )
 
-    expect(view.segments.map(segment => segment.kind)).toEqual(['text', 'chain', 'artifact', 'text'])
-    const artifact = view.segments[2]
-    expect(artifact?.kind === 'artifact' && artifact.media[0]?.fileId).toBe('a'.repeat(32))
+    expect(view.blocks.map(block => block.type)).toEqual(['text', 'chain', 'media', 'text'])
+    const media = view.blocks[2]
+    expect(media?.type === 'media' && media.media[0]?.fileId).toBe('a'.repeat(32))
     // 两个工具在同一条链里，产物不能把链切断成两段
     expect(view.steps).toHaveLength(2)
   })
 
-  it('merges consecutive generated images into one artifact block', () => {
+  it('merges consecutive generated images into one media block', () => {
     const image = (id: string) => ({
       ...base(id),
       type: 'image' as const,
@@ -460,9 +461,9 @@ describe('buildTurnView', () => {
       null,
     )
 
-    expect(view.segments).toHaveLength(1)
-    const artifact = view.segments[0]
-    expect(artifact?.kind === 'artifact' && artifact.media).toHaveLength(4)
+    expect(view.blocks).toHaveLength(1)
+    const media = view.blocks[0]
+    expect(media?.type === 'media' && media.media).toHaveLength(4)
   })
 
   it('routes published files to attachments and images to the body', () => {
@@ -486,10 +487,10 @@ describe('buildTurnView', () => {
     )
 
     // 图片在正文看，文件只在末尾清单里拿，不要两处都出现
-    expect(view.segments.map(segment => segment.kind)).toEqual(['text', 'artifact'])
+    expect(view.blocks.map(block => block.type)).toEqual(['text', 'media'])
     expect(view.attachments.map(item => item.name)).toEqual(['r1.dat'])
-    const artifact = view.segments[1]
-    expect(artifact?.kind === 'artifact' && artifact.media[0]?.name).toBe('r2.dat')
+    const media = view.blocks[1]
+    expect(media?.type === 'media' && media.media[0]?.name).toBe('r2.dat')
   })
 
   it('hides a successful image step from the chain but keeps failures', () => {
@@ -523,13 +524,13 @@ describe('buildTurnView', () => {
 
     const ok = buildTurnView(run([call, done, image]), null)
     // 出图成功时链里不留步骤，产物本身就是反馈
-    expect(ok.segments.every(segment => segment.kind !== 'chain')).toBe(true)
+    expect(ok.blocks.every(block => block.type !== 'chain')).toBe(true)
 
     const failed = buildTurnView(run([call], 'failed'), null)
-    expect(failed.segments.some(segment => segment.kind === 'chain')).toBe(true)
+    expect(failed.blocks.some(block => block.type === 'chain')).toBe(true)
   })
 
-  it('flags in-flight image generation so the skeleton can stand in', () => {
+  it('stands a pending media block in while an image is generating', () => {
     const live = buildTurnView(
       run([], 'running'),
       liveRun([
@@ -540,16 +541,20 @@ describe('buildTurnView', () => {
         },
       ]),
     )
-    expect(live.generatingImage).toBe(true)
-    expect(live.segments).toHaveLength(0)
+    expect(live.blocks).toHaveLength(1)
+    const pending = live.blocks[0]
+    expect(pending?.type).toBe('media')
+    if (pending?.type === 'media') {
+      expect(pending.state).toBe('pending')
+      expect(pending.media).toEqual([])
+    }
 
     const idle = buildTurnView(run([], 'running'), liveRun([]))
-    expect(idle.generatingImage).toBe(false)
+    expect(idle.blocks).toHaveLength(0)
   })
 
-  it('keeps the artifact card when reasoning resumes under the same message id', () => {
-    // 出图后模型常带同一个 messageId 继续想：两段 chain 的 key 撞车，
-    // Vue 会把夹在中间的产物卡直接从 DOM 里挤掉（刷新才回来）。
+  it('keeps the media card when reasoning resumes under the same message id', () => {
+    // 出图后模型常带同一个 messageId 继续想：块 key 撞车会把夹在中间的产物卡挤掉
     const view = buildTurnView(
       run([], 'running'),
       liveRun([
@@ -583,12 +588,12 @@ describe('buildTurnView', () => {
       ]),
     )
 
-    expect(view.segments.map(segment => segment.kind)).toEqual(['chain', 'artifact', 'chain'])
-    const ids = view.segments.map(segment => segment.id)
+    expect(view.blocks.map(block => block.type)).toEqual(['chain', 'media', 'chain'])
+    const ids = view.blocks.map(block => block.id)
     expect(new Set(ids).size).toBe(ids.length)
-    if (view.segments[2]?.kind === 'chain') {
-      expect(view.segments[2].entries[0]?.kind === 'reasoning'
-        ? view.segments[2].entries[0].text
+    if (view.blocks[2]?.type === 'chain') {
+      expect(view.blocks[2].entries[0]?.kind === 'reasoning'
+        ? view.blocks[2].entries[0].text
         : null).toBe('图已经出来了')
     }
   })
@@ -635,5 +640,51 @@ describe('buildTurnView', () => {
       { url: 'https://docs.dify.ai/guide', icon: 'https://cdn.deepseek.com/site-icons/dify.ai' },
       { url: 'https://example.com/a', icon: null },
     ])
+  })
+
+  it('renders unknown tools with the default step adapter', () => {
+    const view = buildTurnView(
+      run([
+        {
+          ...base('c1'),
+          type: 'tool_call',
+          tool_call_id: 'call-1',
+          tool_name: 'brand_new_tool',
+          args: { q: 'x' },
+        },
+        {
+          ...base('r1'),
+          type: 'tool_result',
+          tool_call_id: 'call-1',
+          tool_name: 'brand_new_tool',
+          content: { url: 'https://example.com/result' },
+          outcome: 'success',
+        },
+      ]),
+      null,
+    )
+
+    expect(view.blocks.map(block => block.type)).toEqual(['chain'])
+    expect(view.steps[0]?.state).toBe('success')
+    expect(view.sources.map(source => source.url)).toEqual(['https://example.com/result'])
+  })
+
+  it('keeps custom messages as a visible card instead of dropping them', () => {
+    const view = buildTurnView(
+      run([
+        {
+          ...base('x1'),
+          type: 'custom',
+          renderer: 'demo-card',
+          version: 1,
+          data: { text: 'hello' },
+        },
+      ]),
+      null,
+    )
+
+    expect(view.blocks.map(block => block.type)).toEqual(['card'])
+    const card = view.blocks[0]
+    expect(card?.type === 'card' ? card.renderer : null).toBe('demo-card')
   })
 })

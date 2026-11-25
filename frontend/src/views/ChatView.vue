@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { useLocalStorage, useMediaQuery, useWindowSize } from '@vueuse/core'
 import { useRoute } from 'vue-router'
 import { toast } from 'vue-sonner'
@@ -8,6 +8,7 @@ import { AlertTriangle, ArrowDown, Loader2, RefreshCw } from '@lucide/vue'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { TooltipHint } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/http'
+import { PANEL_HOST_KEY } from '@/lib/panelHost'
 import { onScrollIntent } from '@/lib/scrollIntent'
 import { buildTurnView, projectLiveRun } from '@/lib/turnModel'
 import { groupTurnRuns } from '@/lib/turns'
@@ -17,18 +18,18 @@ import { useUiStore } from '@/stores/ui'
 import { useChatScroll } from '@/composables/useChatScroll'
 import { useComposerFlight } from '@/composables/useComposerFlight'
 import AppSidebar from '@/components/chat/AppSidebar.vue'
-import AssistantTurn from '@/components/chat/AssistantTurn.vue'
 import ChatHeader from '@/components/chat/ChatHeader.vue'
 import Composer from '@/components/chat/Composer.vue'
-import ContextCheckpoint from '@/components/chat/ContextCheckpoint.vue'
 import ConversationTurn from '@/components/chat/ConversationTurn.vue'
 import EmptyState from '@/components/chat/EmptyState.vue'
 import FlightField from '@/components/brand/FlightField.vue'
 import PreviewPanel from '@/components/chat/PreviewPanel.vue'
+import TurnShell from '@/components/turn/TurnShell.vue'
 
 const chat = useChatStore()
 const panels = usePanelStore()
 const ui = useUiStore()
+provide(PANEL_HOST_KEY, true)
 const route = useRoute()
 const isWide = useMediaQuery('(min-width: 1280px)')
 const { width: windowWidth } = useWindowSize()
@@ -65,8 +66,6 @@ const liveOnlyView = computed(() => {
   const run = liveOnlyRun.value
   return run ? buildTurnView(run, chat.liveRun) : null
 })
-
-const liveOnlyCompaction = computed(() => (liveOnlyRun.value ? chat.liveRun?.compaction ?? null : null))
 
 const noModels = computed(() => chat.modelsLoaded && !chat.activeModels.length)
 const loadFailed = computed(() => Boolean(chat.bootstrapError) && !chat.modelsLoaded)
@@ -310,19 +309,12 @@ async function restoreSession(): Promise<void> {
                     :group="group"
                     :is-last="group.id === lastRunId && !liveOnlyRun"
                   />
-                  <template v-if="liveOnlyRun && liveOnlyView">
-                    <ContextCheckpoint
-                      v-if="liveOnlyCompaction"
-                      :state="liveOnlyCompaction.status"
-                      :summary="liveOnlyCompaction.summary"
-                      :tokens-before="liveOnlyCompaction.tokensBefore"
-                    />
-                    <AssistantTurn
-                      :run="liveOnlyRun"
-                      :view="liveOnlyView"
-                      :is-last="true"
-                    />
-                  </template>
+                  <TurnShell
+                    v-if="liveOnlyRun && liveOnlyView"
+                    :run="liveOnlyRun"
+                    :view="liveOnlyView"
+                    :is-last="true"
+                  />
                 </div>
               </template>
             </div>

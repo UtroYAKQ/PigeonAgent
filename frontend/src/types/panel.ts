@@ -1,4 +1,4 @@
-export type PanelTabType = 'html' | 'markdown' | 'code'
+export type PanelTabType = 'html' | 'markdown' | 'code' | 'file'
 
 export interface PanelTab {
   id: string
@@ -8,6 +8,9 @@ export interface PanelTab {
   content: string
   language?: string
   sourceId?: string
+  fileId?: string
+  mediaType?: string | null
+  size?: number | null
 }
 
 export type PanelTabInput = Omit<PanelTab, 'id'>

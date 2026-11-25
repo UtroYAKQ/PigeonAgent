@@ -86,7 +86,7 @@ function closePanel(): void {
       </TooltipHint>
     </header>
 
-    <div class="min-h-0 flex-1 bg-surface/60 p-3">
+    <div class="min-h-0 flex-1 bg-background">
       <PanelTabContent :tab="active" />
     </div>
   </aside>

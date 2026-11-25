@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SessionRun, ToolResultItem } from '@/types/api'
-import { askQuestions, buildPendingBatches, isPreviewOnlyBatch } from './pending'
-import { ASK_TOOL, PREVIEW_TOOL } from './frontendTools'
+import { askQuestions, buildPendingBatches } from './pending'
+import { ASK_TOOL } from './frontendTools'
 
 const now = '2026-01-01T00:00:00Z'
 
@@ -110,28 +110,7 @@ describe('buildPendingBatches', () => {
     expect(batch?.resolved).toBe(true)
   })
 
-  it('detects preview-only batches', () => {
-    const run = makeRun([
-      {
-        ...itemBase('call-1'),
-        type: 'tool_call',
-        tool_call_id: 'call-1',
-        tool_name: PREVIEW_TOOL,
-        args: { title: '预览', html: '<p>hi</p>' },
-      },
-      {
-        ...itemBase('request-1'),
-        type: 'call_request',
-        interrupt_id: 'interrupt-1',
-        tool_call_ids: ['call-1'],
-      },
-    ])
-
-    const [batch] = buildPendingBatches(run, new Map())
-    expect(batch && isPreviewOnlyBatch(batch)).toBe(true)
-  })
-
-  it('提问批次不算 preview-only，绝不自动 resume', () => {
+  it('解析提问批次为问卷', () => {
     const run = makeRun([
       {
         ...itemBase('call-ask'),
@@ -151,8 +130,6 @@ describe('buildPendingBatches', () => {
     ])
 
     const [batch] = buildPendingBatches(run, new Map())
-    // 预览可以自动打开并回填；提问必须等人选，自动 resume 会把模型的答案写成空
-    expect(batch && isPreviewOnlyBatch(batch)).toBe(false)
     const tool = batch?.pendingCalls[0]
     expect(tool && askQuestions(tool)?.[0]?.options).toEqual([
       { label: '甲', description: null },
