@@ -78,7 +78,7 @@ export const ADMIN_SECTIONS: AdminSection[] = [
     group: '平台运营',
     label: '会话管理',
     title: '会话管理',
-    description: '查看全平台会话，归档或恢复历史对话。',
+    description: '查看全平台会话；进行中的对话会实时订阅，也可归档或恢复历史会话。',
     icon: MessagesSquare,
     panel: SessionManagementPanel,
   },

@@ -94,6 +94,8 @@ export interface AdminSession {
   model_id: number | null
   has_unread: boolean
   active_run_id: string | null
+  /** 租约未过期、确实在跑；active_run_id 可能只是崩溃遗留 */
+  live: boolean
   usage: TokenUsage
   run_count: number
   last_run_at: string

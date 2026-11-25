@@ -2,7 +2,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { toast } from 'vue-sonner'
-import { Archive, ArchiveRestore, Loader2, MessagesSquare, RefreshCw } from '@lucide/vue'
+import { Archive, ArchiveRestore, Eye, Loader2, MessagesSquare, RefreshCw } from '@lucide/vue'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import AdminPager from '@/components/admin/AdminPager.vue'
+import SessionConversationPanel from '@/components/admin/SessionConversationPanel.vue'
 import TableFrame from '@/components/console/TableFrame.vue'
 import { adminApi } from '@/api/admin'
 import { usePagedTable } from '@/composables/usePagedTable'
@@ -26,6 +27,7 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 const query = ref('')
 const statusFilter = ref<SessionStatus | 'all'>('all')
 const updatingId = ref<string | null>(null)
+const selectedSessionId = ref<string | null>(null)
 const {
   items: sessions,
   total,
@@ -76,7 +78,12 @@ async function toggleStatus(session: AdminSession): Promise<void> {
 </script>
 
 <template>
-  <div>
+  <SessionConversationPanel
+    v-if="selectedSessionId"
+    :session-id="selectedSessionId"
+    @back="selectedSessionId = null"
+  />
+  <div v-else>
     <TableFrame>
       <template #toolbar>
         <Input
@@ -176,7 +183,7 @@ async function toggleStatus(session: AdminSession): Promise<void> {
                   <Badge :variant="session.status === 'active' ? 'secondary' : 'outline'">
                     {{ STATUS_LABELS[session.status] }}
                   </Badge>
-                  <Badge v-if="session.active_run_id" variant="outline" class="gap-1.5">
+                  <Badge v-if="session.live" variant="outline" class="gap-1.5">
                     <span class="size-1.5 animate-pulse rounded-full bg-primary" />
                     运行中
                   </Badge>
@@ -196,18 +203,24 @@ async function toggleStatus(session: AdminSession): Promise<void> {
                 <span :title="formatAdminTime(session.created_at)">{{ formatAdminTime(session.created_at) }}</span>
               </TableCell>
               <TableCell class="px-4 py-2.5 text-right">
-                <Button
-                  variant="outline"
-                  class="h-7"
-                  :disabled="updatingId === session.id || (session.status === 'active' && Boolean(session.active_run_id))"
-                  :title="session.status === 'active' && session.active_run_id ? '运行中的会话不能归档' : undefined"
-                  @click="toggleStatus(session)"
-                >
-                  <Loader2 v-if="updatingId === session.id" class="size-4 animate-spin" />
-                  <ArchiveRestore v-else-if="session.status === 'archived'" class="size-4" />
-                  <Archive v-else class="size-4" />
-                  {{ session.status === 'archived' ? '恢复' : '归档' }}
-                </Button>
+                <div class="flex items-center justify-end gap-2">
+                  <Button variant="outline" class="h-7" @click="selectedSessionId = session.id">
+                    <Eye class="size-4" />
+                    查看
+                  </Button>
+                  <Button
+                    variant="outline"
+                    class="h-7"
+                    :disabled="updatingId === session.id || (session.status === 'active' && Boolean(session.active_run_id))"
+                    :title="session.status === 'active' && session.active_run_id ? '运行中的会话不能归档' : undefined"
+                    @click="toggleStatus(session)"
+                  >
+                    <Loader2 v-if="updatingId === session.id" class="size-4 animate-spin" />
+                    <ArchiveRestore v-else-if="session.status === 'archived'" class="size-4" />
+                    <Archive v-else class="size-4" />
+                    {{ session.status === 'archived' ? '恢复' : '归档' }}
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
           </template>

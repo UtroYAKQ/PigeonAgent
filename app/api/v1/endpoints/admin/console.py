@@ -1,10 +1,14 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
+from fastapi.responses import StreamingResponse
 
-from app.api.deps import AdminUserDep, OperationLoggerDep, SessionDep
+from app.api.deps import AdminUserDep, OperationLoggerDep, RenderHubDep, SessionDep
+from app.core.exceptions import GoneError, UnprocessableError
 from app.enums import SessionStatus
+from app.render.queue import RenderCursorInvalid
+from app.render.sse import encode_consumer
 from app.schemas.admin.console import (
     AdminChatLogList,
     AdminCreditAdjustIn,
@@ -19,10 +23,12 @@ from app.schemas.admin.console import (
     AdminUserRead,
     AdminUserUpdate,
 )
+from app.schemas.run import SessionRunList, SessionRunRead
 from app.services import user as user_service
 from app.services.admin import audit
 from app.services.admin import service as admin_service
 from app.services.billing import service as billing
+from app.services.run.tree import branch_navs, path_runs
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -146,6 +152,67 @@ async def list_sessions(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> AdminSessionList:
     return await admin_service.list_sessions(db, q=q, status=status, limit=limit, offset=offset)
+
+
+@router.get("/sessions/{session_id}", response_model=AdminSessionRead)
+async def get_session_detail(
+    session_id: UUID,
+    db: SessionDep,
+    user: AdminUserDep,
+) -> AdminSessionRead:
+    return await admin_service.get_session(db, session_id)
+
+
+@router.get("/sessions/{session_id}/runs", response_model=SessionRunList)
+async def list_session_runs(
+    session_id: UUID,
+    db: SessionDep,
+    user: AdminUserDep,
+    before_run_id: Annotated[UUID | None, Query()] = None,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+) -> SessionRunList:
+    """管理端只读会话历史；和用户侧同一套分支分页，只是不做 owner 过滤。"""
+    chat_session = await admin_service.load_chat_session(db, session_id)
+    runs, has_more = await path_runs(db, session_id, before_run_id=before_run_id, limit=limit)
+    branches = await branch_navs(db, session_id, runs, chat_session=chat_session)
+    return SessionRunList(
+        items=[
+            SessionRunRead.model_validate(run).model_copy(update={"branch": branches.get(run.id)})
+            for run in runs
+        ],
+        has_more=has_more,
+    )
+
+
+@router.get("/sessions/{session_id}/runs/{run_id}/events")
+async def stream_session_run_events(
+    session_id: UUID,
+    run_id: str,
+    hub: RenderHubDep,
+    request: Request,
+    db: SessionDep,
+    user: AdminUserDep,
+    after: Annotated[int, Query(ge=0)] = 0,
+) -> StreamingResponse:
+    """管理员订阅进行中的 run；和用户侧同一条事件流，只读且不校验归属人。"""
+    await admin_service.load_chat_session(db, session_id)
+    last_event_id = request.headers.get("last-event-id")
+    if last_event_id is not None:
+        try:
+            after = int(last_event_id)
+        except ValueError as exc:
+            raise UnprocessableError("Last-Event-ID 必须是整数") from exc
+    try:
+        consumer = await hub.subscribe(run_id, after, session_id=session_id)
+    except RenderCursorInvalid as exc:
+        raise UnprocessableError(str(exc)) from exc
+    if consumer is None:
+        raise GoneError(f"Run {run_id} is not streaming")
+    return StreamingResponse(
+        encode_consumer(consumer),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.patch("/sessions/{session_id}", response_model=AdminSessionRead)

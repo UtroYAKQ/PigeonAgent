@@ -31,6 +31,7 @@ from app.schemas.admin.console import (
     AdminUserRead,
     AdminUserUpdate,
 )
+from app.services.run.lease import is_run_live
 
 
 async def _count(db: AsyncSession, statement: Select[int]) -> int:
@@ -196,6 +197,7 @@ def _to_admin_session(
         model_id=chat_session.model_id,
         has_unread=chat_session.has_unread,
         active_run_id=chat_session.active_run_id,
+        live=is_run_live(chat_session),
         usage=chat_session.usage,
         run_count=int(run_count or 0),
         last_run_at=chat_session.last_run_at,
@@ -246,6 +248,14 @@ async def list_sessions(
         for chat_session, owner_email, owner_name, run_count_value in rows
     ]
     return AdminSessionList(items=items, total=total)
+
+
+async def load_chat_session(db: AsyncSession, session_id: uuid.UUID) -> ChatSession:
+    """管理端按 id 取会话头；不做 owner 过滤，但不存在时同样按 404 处理。"""
+    chat_session = await db.get(ChatSession, session_id)
+    if chat_session is None:
+        raise NotFoundError(f"会话 {session_id} 不存在")
+    return chat_session
 
 
 async def get_session(db: AsyncSession, session_id: uuid.UUID) -> AdminSessionRead:

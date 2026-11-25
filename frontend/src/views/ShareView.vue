@@ -5,19 +5,13 @@ import { AlertTriangle, Loader2, Lock } from '@lucide/vue'
 
 import { sharesApi } from '@/api/shares'
 import BrandMark from '@/components/brand/BrandMark.vue'
-import ArtifactBlock from '@/components/chat/ArtifactBlock.vue'
-import MarkdownMessage from '@/components/chat/MarkdownMessage.vue'
-import SourcesRow from '@/components/chat/SourcesRow.vue'
-import ThinkingChain from '@/components/chat/ThinkingChain.vue'
-import TurnFiles from '@/components/chat/TurnFiles.vue'
+import ReadOnlyTurn from '@/components/chat/ReadOnlyTurn.vue'
 import { errorMessage } from '@/lib/http'
 import { formatDateTime } from '@/lib/format'
-import { buildTurnView, hasAssistantOutput } from '@/lib/turnModel'
-import { useUiStore } from '@/stores/ui'
+import { buildTurnView } from '@/lib/turnModel'
 import type { SessionRun, SharedConversation } from '@/types/api'
 
 const route = useRoute()
-const ui = useUiStore()
 
 const token = computed(() => String(route.params.token ?? ''))
 const conversation = ref<SharedConversation | null>(null)
@@ -154,46 +148,7 @@ onBeforeUnmount(clearRobots)
         </div>
 
         <div class="flex flex-col gap-10">
-          <article v-for="turn in turns" :key="turn.run.id" class="flex flex-col gap-4">
-            <div v-if="turn.view.userText" class="ml-auto max-w-[85%]">
-              <div class="rounded-2xl bg-surface px-4 py-3 text-[14px] leading-7 whitespace-pre-wrap break-words">
-                {{ turn.view.userText }}
-              </div>
-            </div>
-
-            <div class="min-w-0">
-              <template v-for="segment in turn.view.segments" :key="segment.id">
-                <ThinkingChain
-                  v-if="segment.kind === 'chain'"
-                  :chain="segment.entries"
-                  :is-streaming="false"
-                  :status="turn.view.status"
-                  :default-open="ui.autoExpandThinking"
-                  :default-details-open="ui.autoExpandToolDetails"
-                />
-                <ArtifactBlock
-                  v-else-if="segment.kind === 'artifact'"
-                  :media="segment.media"
-                  :credits="segment.credits"
-                />
-                <MarkdownMessage v-else :content="segment.text" />
-              </template>
-
-              <TurnFiles v-if="turn.view.attachments.length" :media="turn.view.attachments" />
-
-              <SourcesRow v-if="turn.view.sources.length" :sources="turn.view.sources" />
-
-              <div
-                v-if="turn.view.error || (!hasAssistantOutput(turn.view) && turn.view.userText)"
-                class="mt-3 flex items-start gap-2 text-[12px] leading-5 text-muted-foreground"
-              >
-                <AlertTriangle class="mt-0.5 size-3.5 shrink-0" />
-                <span class="min-w-0 flex-1">
-                  {{ turn.view.error?.message || '这一轮没有可展示的内容。' }}
-                </span>
-              </div>
-            </div>
-          </article>
+          <ReadOnlyTurn v-for="turn in turns" :key="turn.run.id" :view="turn.view" />
         </div>
 
         <footer class="mt-14 border-t border-border pt-5 text-[12px] leading-6 text-muted-foreground">

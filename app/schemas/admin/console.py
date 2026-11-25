@@ -74,6 +74,8 @@ class AdminSessionRead(BaseModel):
     model_id: int | None
     has_unread: bool
     active_run_id: str | None
+    # 租约未过期才算真的在跑；active_run_id 可能是崩溃遗留
+    live: bool
     usage: TokenUsage
     run_count: int
     last_run_at: datetime

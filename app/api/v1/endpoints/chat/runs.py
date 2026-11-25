@@ -1,6 +1,4 @@
-import asyncio
 import logging
-from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
@@ -17,8 +15,8 @@ from app.api.deps import (
     SettingsDep,
 )
 from app.core.exceptions import GoneError, UnprocessableError
-from app.render.consumer import RenderConsumer
 from app.render.queue import RenderCursorInvalid
+from app.render.sse import encode_consumer
 from app.schemas.run import RunCreate, RunRead, RunResume
 from app.services.chat import session as session_service
 from app.services.run.launch import launch_run
@@ -26,9 +24,6 @@ from app.services.run.launch import launch_run
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["runs"])
-
-# SSE 心跳间隔：工具长时间运行期间保持连接不被反代/客户端掐断
-HEARTBEAT_INTERVAL_SECONDS = 15.0
 
 
 @router.post(
@@ -133,25 +128,7 @@ async def stream_run_events(
         raise GoneError(f"Run {run_id} is not streaming")
 
     return StreamingResponse(
-        _encode(consumer),
+        encode_consumer(consumer),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-async def _encode(consumer: RenderConsumer) -> AsyncIterator[str]:
-    try:
-        while True:
-            try:
-                async with asyncio.timeout(HEARTBEAT_INTERVAL_SECONDS):
-                    events, closed = await consumer.read()
-            except TimeoutError:
-                yield ": ping\n\n"
-                continue
-            for item in events:
-                yield f"id: {item.seq}\ndata: {item.event.model_dump_json(by_alias=True)}\n\n"
-            if closed:
-                return
-    finally:
-        # 消费者退出后队列才知道落盘文件可以回收了
-        consumer.close()

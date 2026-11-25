@@ -108,6 +108,30 @@ async def test_stream_unknown_run_is_gone(client: AsyncClient, db_session: Async
     assert response.status_code == 410
 
 
+async def test_admin_can_subscribe_to_live_run(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    hub = get_hub()
+    session_id = await make_stream_session(db_session)
+    producer = await hub.create(session_id, "run-admin")
+    await producer.publish(RunStartedEvent(thread_id="t", run_id="run-admin"))
+
+    request = asyncio.create_task(
+        client.get(f"/api/v1/admin/sessions/{session_id}/runs/run-admin/events")
+    )
+    await asyncio.sleep(0.5)
+    await producer.publish(TextMessageContentEvent(message_id="m", delta="admin"))
+    await producer.publish(RunFinishedEvent(thread_id="t", run_id="run-admin"))
+    await producer.close()
+    response = await request
+
+    assert response.status_code == 200
+    assert '"delta":"admin"' in response.text
+
+    missing = await client.get(f"/api/v1/admin/sessions/{session_id}/runs/missing/events")
+    assert missing.status_code == 410
+
+
 async def test_stream_rejects_invalid_cursor(client: AsyncClient, db_session: AsyncSession) -> None:
     hub = get_hub()
     session_id = await make_stream_session(db_session)

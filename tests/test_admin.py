@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.run_items import TokenUsage
 from app.models.account.user import User
 from app.models.chat.log import ChatRequestLog
-from tests.helpers import make_session
+from app.services.run.lease import finish_run
+from tests.helpers import append_user_run, make_session, reserve_lease
 
 
 async def test_admin_users_list_reports_fractional_balance(
@@ -88,7 +89,8 @@ async def test_admin_stats_users_sessions_and_logs(
 ) -> None:
     member, member_headers = await _register_member(client)
     member_id = uuid.UUID(member["id"])
-    await make_session(db_session, title="成员会话", owner_id=member_id)
+    session_id = await make_session(db_session, title="成员会话", owner_id=member_id)
+    await append_user_run(db_session, session_id, "会话内容")
 
     stats = await client.get("/api/v1/admin/stats")
     assert stats.status_code == 200, stats.text
@@ -117,7 +119,24 @@ async def test_admin_stats_users_sessions_and_logs(
     assert len(session_items) == 1
     session = session_items[0]
     assert session["owner_email"] == "member-admin@example.com"
-    assert session["run_count"] == 0
+    assert session["run_count"] == 1
+    assert session["live"] is False
+
+    detail = await client.get(f"/api/v1/admin/sessions/{session['id']}")
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["live"] is False
+    # 该成员在前面已被停用，令牌失效后返回 401；未停用时才是 403，两者都不能放行
+    assert (
+        await client.get(f"/api/v1/admin/sessions/{session['id']}/runs", headers=member_headers)
+    ).status_code in {401, 403}
+
+    runs = await client.get(f"/api/v1/admin/sessions/{session['id']}/runs")
+    assert runs.status_code == 200, runs.text
+    assert runs.json()["items"][0]["content"][0]["text"] == "会话内容"
+
+    await reserve_lease(db_session, session_id, "run-live")
+    assert (await client.get(f"/api/v1/admin/sessions/{session['id']}")).json()["live"] is True
+    await finish_run(db_session, session_id, "run-live")
 
     archived = await client.patch(
         f"/api/v1/admin/sessions/{session['id']}", json={"status": "archived"}

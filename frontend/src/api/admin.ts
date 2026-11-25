@@ -8,9 +8,10 @@ import type {
   AdminUser,
   AdminUserList,
   AdminUserUpdatePayload,
+  SessionRunList,
   SessionStatus,
 } from '@/types/api'
-import { http } from '@/lib/http'
+import { API_BASE_URL, http } from '@/lib/http'
 
 export const adminApi = {
   async stats(): Promise<AdminStats> {
@@ -69,6 +70,23 @@ export const adminApi = {
   ): Promise<AdminSessionList> {
     const { data } = await http.get<AdminSessionList>('/admin/sessions', { params })
     return data
+  },
+
+  async session(id: string): Promise<AdminSession> {
+    const { data } = await http.get<AdminSession>(`/admin/sessions/${id}`)
+    return data
+  },
+
+  async sessionRuns(
+    id: string,
+    params: { before_run_id?: string; limit?: number } = {},
+  ): Promise<SessionRunList> {
+    const { data } = await http.get<SessionRunList>(`/admin/sessions/${id}/runs`, { params })
+    return data
+  },
+
+  sessionEventsUrl(id: string, runId: string, after = 0): string {
+    return `${API_BASE_URL}/admin/sessions/${id}/runs/${runId}/events?after=${after}`
   },
 
   async updateSession(id: string, status: SessionStatus): Promise<AdminSession> {
