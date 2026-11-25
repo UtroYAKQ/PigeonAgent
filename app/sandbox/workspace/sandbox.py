@@ -2,27 +2,33 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import fnmatch
 import logging
+import re
+import shlex
 import uuid
 from collections.abc import Awaitable, Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from app.core.config import Settings
 from app.infra.files.storage import ObjectStorage
-from app.models.files.blob import Blob
-from app.models.files.record import FileRecord
 from app.sandbox.workspace.base import RunWorkspace
 from app.sandbox.workspace.common import (
     _DEFAULT_FILES_DIR,
-    _MAX_COMMAND_OUTPUT,
+    _GREP_LINE_CHARS,
+    _MAX_GREP_RESULTS,
     _MAX_LIST_ENTRIES,
+    _MAX_READ_BYTES,
     _SANDBOX_WRITE_TIMEOUT_SECONDS,
+    LoadJob,
     WorkspaceError,
     _materialize_load_batch,
     _relative_clean,
-    text_read,
+    clip_output,
+    text_view,
 )
 
 if TYPE_CHECKING:
@@ -63,7 +69,8 @@ class SandboxWorkspace(RunWorkspace):
     def description(self) -> str:
         return (
             f"工作区是云沙箱里的 {self.root}（只允许写这个目录及子目录，同会话跨轮保留）："
-            "可以跑任意 Linux 命令（run_command），读写文件用 write_file / read_file。"
+            "可以跑任意 Linux 命令（run_command），也可以用 run_script 一次执行 Python；"
+            "读写文件用 write_file / read_file，找内容用 grep_files。"
         )
 
     # ------------------------------------------------------------------ 内部
@@ -95,36 +102,72 @@ class SandboxWorkspace(RunWorkspace):
         self._mark()
         sandbox = await self._ensure_sandbox()
 
-        async def persist(key: str, record: FileRecord, blob: Blob, name: str) -> dict[str, Any]:
-            target = self._abs(name)
-            try:
-                data = await self.storage.get(blob.storage_key)
-            except Exception as exc:
-                logger.exception("Sandbox storage read failed for %s in run %s", key, self.run_id)
-                return {
-                    "storage_key": key,
-                    "error": f"读取对象存储失败：{exc.__class__.__name__}",
-                }
-            try:
-                await sandbox.files.write(
-                    target,
-                    data,
-                    request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS,
-                )
-            except Exception as exc:
-                logger.exception("Sandbox write failed for %s in run %s", key, self.run_id)
-                return {
-                    "storage_key": key,
-                    "error": f"写入沙箱失败：{exc.__class__.__name__}",
-                }
-            return {
-                "storage_key": key,
-                "original_name": record.name,
-                "saved_as": name,
-                "size": blob.size,
-            }
+        async def persist_many(jobs: list[LoadJob]) -> list[dict[str, Any]]:
+            fetched = await asyncio.gather(
+                *(self.storage.get(job[2].storage_key) for job in jobs),
+                return_exceptions=True,
+            )
+            results: list[dict[str, Any] | None] = [None] * len(jobs)
+            writes: list[tuple[int, str, bytes]] = []
+            for index, (job, data) in enumerate(zip(jobs, fetched, strict=True)):
+                key, _record, _blob, name = job
+                if isinstance(data, asyncio.CancelledError):
+                    raise data
+                if isinstance(data, BaseException):
+                    logger.error(
+                        "Sandbox storage read failed for %s in run %s",
+                        key,
+                        self.run_id,
+                        exc_info=(type(data), data, data.__traceback__),
+                    )
+                    results[index] = {
+                        "storage_key": key,
+                        "error": f"读取对象存储失败：{data.__class__.__name__}",
+                    }
+                    continue
+                writes.append((index, self._abs(name), bytes(data)))
 
-        return await _materialize_load_batch(db, file_ids, owner_id, persist)
+            def succeed(index: int, size: int) -> None:
+                key, record, _blob, name = jobs[index]
+                results[index] = {
+                    "storage_key": key,
+                    "original_name": record.name,
+                    "saved_as": name,
+                    "size": size,
+                }
+
+            if writes:
+                try:
+                    await sandbox.files.write_files(
+                        [{"path": path, "data": data} for _, path, data in writes],
+                        request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS,
+                    )
+                except Exception:
+                    # 批量写失败时逐条重试，保留每一行具体失败原因
+                    for index, path, data in writes:
+                        try:
+                            await sandbox.files.write(
+                                path, data, request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS
+                            )
+                        except Exception as exc:
+                            key = jobs[index][0]
+                            logger.exception(
+                                "Sandbox write failed for %s in run %s", key, self.run_id
+                            )
+                            results[index] = {
+                                "storage_key": key,
+                                "error": f"写入沙箱失败：{exc.__class__.__name__}",
+                            }
+                        else:
+                            succeed(index, len(data))
+                else:
+                    for index, _path, data in writes:
+                        succeed(index, len(data))
+            return [entry for entry in results if entry is not None]
+
+        return await _materialize_load_batch(
+            db, file_ids, owner_id, persist_many=persist_many
+        )
 
     async def put_file(self, name: str, content: str, *, append: bool = False) -> dict[str, Any]:
         self._mark()
@@ -132,33 +175,103 @@ class SandboxWorkspace(RunWorkspace):
         if pure is None:
             raise WorkspaceError(f"非法路径：{name!r}")
         sandbox = await self._ensure_sandbox()
-        target = Path(self.root) / Path(*pure.parts)
-        if target.parent != Path(self.root):
-            # 目录已存在时 make_dir 可能报错；真正的写入失败由 files.write 返回
-            with contextlib.suppress(Exception):
-                await sandbox.files.make_dir(target.parent.as_posix())
+        target = (Path(self.root) / Path(*pure.parts)).as_posix()
         data = content.encode("utf-8")
-        payload = data
         if append:
-            try:
-                existing = bytes(await sandbox.files.read(target.as_posix(), format="bytes"))
-            except Exception as exc:
-                raise WorkspaceError(f"{name} 还不存在；第一次写入请用 append=false") from exc
-            payload = existing + data
-        await sandbox.files.write(
-            target.as_posix(), payload, request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS
-        )
+            await self._append_bytes(sandbox, target, data, name)
+        else:
+            await sandbox.files.write(
+                target, data, request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS
+            )
         return {"saved_as": pure.as_posix(), "size": len(data), "append": append}
+
+    async def _append_bytes(
+        self, sandbox: AsyncSandbox, target: str, data: bytes, name: str
+    ) -> None:
+        """只上传新增字节，在沙箱里就地追加；不再把原文件整份读回来。"""
+        tmp = f"{target}.part-{uuid.uuid4().hex}"
+        await sandbox.files.write(tmp, data, request_timeout=_SANDBOX_WRITE_TIMEOUT_SECONDS)
+        command = (
+            f"if [ ! -f {shlex.quote(target)} ]; then rm -f {shlex.quote(tmp)}; exit 3; fi; "
+            f"cat {shlex.quote(tmp)} >> {shlex.quote(target)} && rm -f {shlex.quote(tmp)}"
+        )
+        result: Any = None
+        try:
+            result = await sandbox.commands.run(command, cwd=self.root, timeout=30)
+            exit_code: int | None = getattr(result, "exit_code", 0)
+        except Exception as exc:
+            exit_code = getattr(exc, "exit_code", None)
+            if exit_code is None:
+                raise WorkspaceError(f"追加写入沙箱失败：{exc.__class__.__name__}") from exc
+        if exit_code == 3:
+            raise WorkspaceError(f"{name} 还不存在；第一次写入请用 append=false")
+        if exit_code != 0 or result is None:
+            with contextlib.suppress(Exception):
+                await sandbox.commands.run(f"rm -f {shlex.quote(tmp)}", cwd=self.root, timeout=30)
+            raise WorkspaceError(f"追加写入沙箱失败（exit {exit_code}）")
 
     async def read_file(self, name: str, offset: int = 1, limit: int = 200) -> dict[str, Any]:
         self._mark()
         target = self._abs(name)
         sandbox = await self._ensure_sandbox()
+        return await self._read_lines(sandbox, target, name, offset, limit)
+
+    async def _read_lines(
+        self,
+        sandbox: AsyncSandbox,
+        target: str,
+        name: str,
+        offset: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        """在沙箱里用 awk 只取目标行，不再把整份文件拉回后端。"""
+        start = max(1, offset)
+        end = start - 1 + max(1, limit)
+        program = "NR>=s && NR<=e {print} END {printf \"__PIGEON_TOTAL__%d\\n\", NR}"
+        command = (
+            f"LC_ALL=C awk -v s={start} -v e={end} "
+            f"{shlex.quote(program)} {shlex.quote(target)}"
+        )
+        result: Any = None
         try:
-            raw = await sandbox.files.read(target, format="bytes")
-        except Exception:
-            return {"error": f"沙箱里读不到 {name}；先用 load_files 或 write_file"}
-        return text_read(bytes(raw), str(name), offset, limit)
+            result = await sandbox.commands.run(command, cwd=self.root, timeout=30)
+            exit_code = getattr(result, "exit_code", 0)
+        except Exception as exc:
+            exit_code = getattr(exc, "exit_code", None)
+            if exit_code is None:
+                raise WorkspaceError(f"读取沙箱文件失败：{exc.__class__.__name__}") from exc
+        if exit_code == 2:
+            return await self._file_missing(name)
+        if exit_code != 0 or result is None:
+            raise WorkspaceError(f"读取沙箱文件失败（exit {exit_code}）")
+
+        lines = (result.stdout or "").splitlines()
+        total = start - 1 + len(lines)
+        if lines and lines[-1].startswith("__PIGEON_TOTAL__"):
+            with contextlib.suppress(ValueError):
+                total = int(lines[-1].removeprefix("__PIGEON_TOTAL__"))
+            lines.pop()
+        raw = "\n".join(lines)
+        if "\x00" in raw[:4096]:
+            return {"error": f"{name} 是二进制文件，这个工具读不了"}
+        return text_view(
+            raw[:_MAX_READ_BYTES].splitlines(),
+            name,
+            offset,
+            limit,
+            total=total,
+            first_line=start,
+        )
+
+    async def _file_missing(self, name: str) -> dict[str, Any]:
+        available: list[Any] = []
+        with contextlib.suppress(Exception):
+            listing = await self.list_files()
+            available = listing.get("entries", [])
+        return {
+            "error": f"沙箱里读不到 {name}；先用 load_files 或 write_file",
+            "available": available,
+        }
 
     async def read_binary(self, name: str, *, max_bytes: int | None = None) -> bytes:
         self._mark()
@@ -177,12 +290,20 @@ class SandboxWorkspace(RunWorkspace):
             raise WorkspaceError(f"沙箱里读不到 {name}；先用 load_files 或 write_file") from exc
         return bytes(raw)
 
-    async def list_files(self, subdir: str = ".") -> dict[str, Any]:
+    async def list_files(
+        self,
+        subdir: str = ".",
+        *,
+        pattern: str | None = None,
+        recursive: bool = False,
+    ) -> dict[str, Any]:
         self._mark()
         pure = _relative_clean(subdir)
         if pure is None:
             return {"error": f"非法路径：{subdir!r}"}
         sandbox = await self._ensure_sandbox()
+        if recursive:
+            return await self._list_tree(sandbox, pure, pattern)
         try:
             raw = await sandbox.files.list(self.path_in(subdir).as_posix())
         except Exception:
@@ -190,7 +311,7 @@ class SandboxWorkspace(RunWorkspace):
         entries: list[dict[str, Any]] = []
         for entry in raw:
             name = getattr(entry, "name", None)
-            if not name:
+            if not name or (pattern and not fnmatch.fnmatch(name, pattern)):
                 continue
             entries.append(
                 {
@@ -199,18 +320,121 @@ class SandboxWorkspace(RunWorkspace):
                     "directory": bool(getattr(entry, "is_dir", False)),
                 }
             )
-        entries.sort(key=lambda item: (not item["directory"], item["name"].casefold()))
-        return {"directory": pure.as_posix(), "entries": entries[:_MAX_LIST_ENTRIES]}
+        entries.sort(key=lambda item: (not item["directory"], item["path"].casefold()))
+        return {
+            "directory": pure.as_posix(),
+            "entries": entries[:_MAX_LIST_ENTRIES],
+            "truncated": len(entries) > _MAX_LIST_ENTRIES,
+        }
+
+    async def _list_tree(
+        self,
+        sandbox: AsyncSandbox,
+        base: PurePosixPath,
+        pattern: str | None,
+    ) -> dict[str, Any]:
+        base_abs = (Path(self.root) / Path(*base.parts)).as_posix()
+        name_filter = f" -name {shlex.quote(pattern)}" if pattern else ""
+        command = (
+            f"find {shlex.quote(base_abs)} -mindepth 1 -maxdepth 10{name_filter} "
+            f"-printf '%y\\t%P\\n' | head -n {_MAX_LIST_ENTRIES + 1}"
+        )
+        try:
+            result = await sandbox.commands.run(command, cwd=self.root, timeout=30)
+        except Exception:
+            return {"error": f"{base.as_posix()} 不是工作区里的目录"}
+        entries: list[dict[str, Any]] = []
+        for line in (result.stdout or "").splitlines():
+            kind, sep, relative = line.partition("\t")
+            if not sep or not relative:
+                continue
+            entries.append(
+                {
+                    "name": PurePosixPath(relative).name,
+                    "path": (base / relative).as_posix(),
+                    "directory": kind == "d",
+                }
+            )
+        entries.sort(key=lambda item: (not item["directory"], item["path"].casefold()))
+        return {
+            "directory": base.as_posix(),
+            "entries": entries[:_MAX_LIST_ENTRIES],
+            "truncated": len(entries) > _MAX_LIST_ENTRIES,
+        }
+
+    async def grep_files(
+        self,
+        pattern: str,
+        subdir: str = ".",
+        glob: str | None = None,
+        max_results: int = 50,
+    ) -> dict[str, Any]:
+        self._mark()
+        pure = _relative_clean(subdir)
+        if pure is None:
+            return {"error": f"非法路径：{subdir!r}"}
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise WorkspaceError(f"正则表达式无效：{exc}") from exc
+        limit = max(1, min(int(max_results), _MAX_GREP_RESULTS))
+        sandbox = await self._ensure_sandbox()
+        base = (Path(self.root) / Path(*pure.parts)).as_posix()
+        include = f" --include={shlex.quote(glob)}" if glob else ""
+        command = (
+            f"if [ ! -d {shlex.quote(base)} ]; then echo __PIGEON_NO_DIR__; exit 0; fi; "
+            f"grep -rInZE{include} -e {shlex.quote(pattern)} {shlex.quote(pure.as_posix())} "
+            f"| head -n {limit + 1}"
+        )
+        try:
+            result = await sandbox.commands.run(command, cwd=self.root, timeout=30)
+        except Exception as exc:
+            raise WorkspaceError(f"沙箱检索失败：{exc.__class__.__name__}") from exc
+        output = result.stdout or ""
+        if "__PIGEON_NO_DIR__" in output:
+            return {"error": f"{subdir} 不是工作区里的目录"}
+        matches: list[dict[str, Any]] = []
+        lines = output.splitlines()
+        for line in lines[:limit]:
+            path, sep, rest = line.partition("\0")
+            lineno, sep2, text = rest.partition(":")
+            if not sep or not sep2:
+                continue
+            matches.append(
+                {
+                    "path": path.removeprefix("./"),
+                    "line": int(lineno) if lineno.isdigit() else 0,
+                    "text": text[:_GREP_LINE_CHARS],
+                }
+            )
+        return {"matches": matches, "count": len(matches), "truncated": len(lines) > limit}
 
     async def run_command(self, command: str, timeout_seconds: int = 120) -> dict[str, Any]:
         self._mark()
         sandbox = await self._ensure_sandbox()
+        return await self._run_shell(sandbox, command, timeout_seconds)
+
+    async def run_script(self, code: str, timeout_seconds: int = 120) -> dict[str, Any]:
+        self._mark()
+        sandbox = await self._ensure_sandbox()
+        return await self._run_shell(
+            sandbox, f"python3 -c {shlex.quote(code)}", timeout_seconds
+        )
+
+    async def _run_shell(
+        self, sandbox: AsyncSandbox, command: str, timeout_seconds: int
+    ) -> dict[str, Any]:
         result = await sandbox.commands.run(
             command, cwd=self.root, timeout=min(float(timeout_seconds), 600.0)
         )
-        stdout = (result.stdout or "")[:_MAX_COMMAND_OUTPUT]
-        stderr = (result.stderr or "")[:_MAX_COMMAND_OUTPUT]
-        return {"exit_code": result.exit_code, "stdout": stdout, "stderr": stderr}
+        stdout, stdout_truncated = clip_output(result.stdout or "")
+        stderr, stderr_truncated = clip_output(result.stderr or "")
+        return {
+            "exit_code": result.exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "truncated": stdout_truncated or stderr_truncated,
+        }
 
 
 def can_use_sandbox(settings: Settings) -> bool:

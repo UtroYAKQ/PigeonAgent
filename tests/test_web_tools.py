@@ -97,6 +97,34 @@ async def test_web_search_returns_error_instead_of_raising(monkeypatch: pytest.M
     assert result["error"] == "额度不足"
 
 
+def test_normalize_search_results_caps_summary_and_snippet() -> None:
+    [result] = _normalize_search_results(
+        {
+            "results": [
+                {
+                    "title": "t",
+                    "url": "https://example.com",
+                    "snippet": "s" * 900,
+                    "summary": "m" * 900,
+                }
+            ]
+        },
+        limit=1,
+    )
+    assert len(result["snippet"]) == 400
+    assert len(result["summary"]) == 800
+
+
+async def test_fetch_url_honors_max_chars(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_post(*args: object, **kwargs: object) -> dict[str, object]:
+        return {"title": "长页面", "content": "x" * 5_000}
+
+    monkeypatch.setattr(web_module, "_post_json", fake_post)
+    result = await WebTools(settings_with_key()).fetch_url("https://example.com", max_chars=1_200)
+    assert len(result["content"]) < 1_300
+    assert result["content"].endswith("[正文过长，已截断]")
+
+
 async def test_fetch_url_returns_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_post(
         settings: Settings,

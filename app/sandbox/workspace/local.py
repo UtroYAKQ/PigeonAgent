@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
+import re
 import shutil
 import uuid
 from pathlib import Path
@@ -14,6 +16,8 @@ from app.models.files.blob import Blob
 from app.models.files.record import FileRecord
 from app.sandbox.workspace.base import RunWorkspace
 from app.sandbox.workspace.common import (
+    _GREP_LINE_CHARS,
+    _MAX_GREP_RESULTS,
     _MAX_LIST_ENTRIES,
     WorkspaceError,
     _materialize_load_batch,
@@ -75,7 +79,7 @@ class LocalWorkspace(RunWorkspace):
                 "size": len(data),
             }
 
-        return await _materialize_load_batch(db, file_ids, owner_id, persist)
+        return await _materialize_load_batch(db, file_ids, owner_id, persist=persist)
 
     async def put_file(self, name: str, content: str, *, append: bool = False) -> dict[str, Any]:
         data = content.encode("utf-8")
@@ -99,7 +103,11 @@ class LocalWorkspace(RunWorkspace):
     async def read_file(self, name: str, offset: int = 1, limit: int = 200) -> dict[str, Any]:
         target = self._safe(name)
         if not await asyncio.to_thread(target.is_file):
-            return {"error": f"{name} 不在工作区里；先用 load_files 或写一个"}
+            listing = await self.list_files()
+            return {
+                "error": f"{name} 不在工作区里；先用 load_files 或写一个",
+                "available": listing.get("entries", []),
+            }
         data = await asyncio.to_thread(target.read_bytes)
         return text_read(data, name, offset, limit)
 
@@ -113,15 +121,47 @@ class LocalWorkspace(RunWorkspace):
                 raise WorkspaceError(f"{name} 超过 {max_bytes // 1024 // 1024} MB 上限")
         return await asyncio.to_thread(target.read_bytes)
 
-    async def list_files(self, subdir: str = ".") -> dict[str, Any]:
+    async def list_files(
+        self,
+        subdir: str = ".",
+        *,
+        pattern: str | None = None,
+        recursive: bool = False,
+    ) -> dict[str, Any]:
         pure = _relative_clean(subdir)
         if pure is None:
             return {"error": f"非法路径：{subdir!r}"}
         base_dir = self.root / Path(*pure.parts)
         if not base_dir.is_dir():
             return {"error": f"{subdir} 不是工作区里的目录"}
-        entries = await asyncio.to_thread(_list_children, self.root, base_dir)
-        return {"directory": pure.as_posix(), "entries": entries[:_MAX_LIST_ENTRIES]}
+        entries = await asyncio.to_thread(
+            _list_children, self.root, base_dir, pattern, recursive
+        )
+        return {
+            "directory": pure.as_posix(),
+            "entries": entries[:_MAX_LIST_ENTRIES],
+            "truncated": len(entries) > _MAX_LIST_ENTRIES,
+        }
+
+    async def grep_files(
+        self,
+        pattern: str,
+        subdir: str = ".",
+        glob: str | None = None,
+        max_results: int = 50,
+    ) -> dict[str, Any]:
+        pure = _relative_clean(subdir)
+        if pure is None:
+            return {"error": f"非法路径：{subdir!r}"}
+        base_dir = self.root / Path(*pure.parts)
+        if not base_dir.is_dir():
+            return {"error": f"{subdir} 不是工作区里的目录"}
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            raise WorkspaceError(f"正则表达式无效：{exc}") from exc
+        limit = max(1, min(int(max_results), _MAX_GREP_RESULTS))
+        return await asyncio.to_thread(_grep_tree, self.root, base_dir, regex, glob, limit)
 
     async def cleanup(self) -> None:
         """本轮结束不清目录：目录是按会话分的，删了等于把上一轮写的文件也删了。
@@ -130,18 +170,56 @@ class LocalWorkspace(RunWorkspace):
         """
 
 
-def _list_children(root: Path, base_dir: Path) -> list[dict[str, Any]]:
-    """只列直接子项；stat 是同步调用，统一在 to_thread 里跑。"""
-    entries: list[dict[str, Any]] = [
-        {
-            "name": child.name,
-            "path": child.relative_to(root).as_posix(),
-            "directory": child.is_dir(),
-        }
-        for child in base_dir.iterdir()
-    ]
-    entries.sort(key=lambda item: (not item["directory"], item["name"].casefold()))
+def _list_children(
+    root: Path,
+    base_dir: Path,
+    pattern: str | None,
+    recursive: bool,
+) -> list[dict[str, Any]]:
+    """列子项；递归与通配符过滤都在 to_thread 里做，避免逐条异步往返。"""
+    children = base_dir.rglob("*") if recursive else base_dir.iterdir()
+    entries: list[dict[str, Any]] = []
+    for child in children:
+        relative = child.relative_to(root).as_posix()
+        if pattern and not (
+            fnmatch.fnmatch(child.name, pattern) or fnmatch.fnmatch(relative, pattern)
+        ):
+            continue
+        entries.append(
+            {
+                "name": child.name,
+                "path": relative,
+                "directory": child.is_dir(),
+            }
+        )
+    entries.sort(key=lambda item: (not item["directory"], item["path"].casefold()))
     return entries
+
+
+def _grep_tree(
+    root: Path,
+    base_dir: Path,
+    regex: re.Pattern[str],
+    glob: str | None,
+    limit: int,
+) -> dict[str, Any]:
+    matches: list[dict[str, Any]] = []
+    for path in sorted(base_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        if glob and not (fnmatch.fnmatch(path.name, glob) or fnmatch.fnmatch(relative, glob)):
+            continue
+        data = path.read_bytes()
+        if b"\x00" in data[:4096]:
+            continue
+        for lineno, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+            if not regex.search(line):
+                continue
+            if len(matches) >= limit:
+                return {"matches": matches, "count": len(matches), "truncated": True}
+            matches.append({"path": relative, "line": lineno, "text": line[:_GREP_LINE_CHARS]})
+    return {"matches": matches, "count": len(matches), "truncated": False}
 
 
 def local_workspace_root(settings: Settings, session_id: uuid.UUID) -> Path:

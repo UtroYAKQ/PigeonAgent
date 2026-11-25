@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,7 @@ from app.sandbox.workspace import (
     purge_session_workspace,
     text_read,
 )
+from app.sandbox.workspace.common import clip_output
 from tests.test_files import FakeStorage
 
 LONG_TEXT = "alpha\nbeta\ngamma\ndelta\nepsilon\n"
@@ -138,16 +140,18 @@ async def test_publish_file_uploads_as_owner(
     tools = workspace_tools(ws, db_session_factory, owner_id=owner, settings=settings)
     publish = next(tool for tool in tools if tool.name == "publish_file")
     ctx = _Ctx()
-    result = await publish.function(ctx, "报告.txt")
+    result = await publish.function(ctx, ["报告.txt"])
 
-    assert result["name"] == "报告.txt"
-    assert result["size"] == len("发布内容".encode())
+    [published] = result["published"]
+    assert result["failed"] == []
+    assert published["name"] == "报告.txt"
+    assert published["size"] == len("发布内容".encode())
     assert len(ctx.events) == 1
     media = ctx.events[0].media[0]
-    assert media.file_id == result["file_id"]
+    assert media.file_id == published["file_id"]
     assert media.origin == "workspace"
     async with db_session_factory() as db:
-        record = await db.get(FileRecord, uuid.UUID(result["file_id"]))
+        record = await db.get(FileRecord, uuid.UUID(published["file_id"]))
         assert record is not None and record.owner_id == owner
         assert record.name == "报告.txt"
         blob = await db.get(Blob, record.blob_hash)
@@ -184,6 +188,49 @@ async def test_tool_bundle_enables_read_image_only_with_storage_and_vision(
     assert "read_image" not in names(with_storage, {"supports_image_input": False})
 
 
+async def test_workspace_tools_expose_grep_and_sandbox_run_tools(
+    tmp_path: Path, db_session_factory: Any
+) -> None:
+    settings = Settings(secret_key="x" * 44, workspace_root=str(tmp_path))
+    local = LocalWorkspace(settings, None, uuid.uuid4(), "run-tools")
+    local_names = {
+        tool.name
+        for tool in workspace_tools(local, db_session_factory, owner_id=None, settings=settings)
+    }
+    sandbox = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-tools", _FakeSandbox())
+    sandbox_names = {
+        tool.name
+        for tool in workspace_tools(sandbox, db_session_factory, owner_id=None, settings=settings)
+    }
+
+    assert {"grep_files", "publish_file", "list_files"} <= local_names
+    assert {"grep_files", "run_command", "run_script"} <= sandbox_names
+    assert "run_script" not in local_names
+    assert "run_command" not in local_names
+
+
+async def test_publish_file_publishes_batch_and_reports_failures(
+    tmp_path: Path, db_session_factory: Any
+) -> None:
+    settings = Settings(secret_key="x" * 44, workspace_root=str(tmp_path))
+    ws = LocalWorkspace(settings, FakeStorage(), uuid.uuid4(), "run-batch-pub")
+    await ws.put_file("a.txt", "A")
+    await ws.put_file("b.txt", "B")
+    publish = next(
+        tool
+        for tool in workspace_tools(ws, db_session_factory, owner_id=None, settings=settings)
+        if tool.name == "publish_file"
+    )
+
+    ctx = _Ctx()
+    result = await publish.function(ctx, ["a.txt", "b.txt", "missing.txt"])
+
+    assert [entry["name"] for entry in result["published"]] == ["a.txt", "b.txt"]
+    assert result["failed"][0]["path"] == "missing.txt"
+    assert len(ctx.events) == 1
+    assert [media.name for media in ctx.events[0].media] == ["a.txt", "b.txt"]
+
+
 async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> None:
     settings = Settings(secret_key="x" * 44, workspace_root=str(tmp_path))
     ws = LocalWorkspace(settings, FakeStorage(), uuid.uuid4(), "run-pub2")
@@ -192,8 +239,8 @@ async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> N
         for tool in workspace_tools(ws, db_session_factory, owner_id=None, settings=settings)
         if tool.name == "publish_file"
     )
-    missing = await publish.function(_Ctx(), "nope.bin")
-    assert "不在工作区" in missing["error"]
+    missing = await publish.function(_Ctx(), ["nope.bin"])
+    assert "不在工作区" in missing["failed"][0]["error"]
 
     await ws.put_file("big.bin", "x" * 2048)
     small = Settings(secret_key="x" * 44, workspace_root=str(tmp_path), max_upload_bytes=1024)
@@ -202,8 +249,8 @@ async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> N
         for tool in workspace_tools(ws, db_session_factory, owner_id=None, settings=small)
         if tool.name == "publish_file"
     )
-    too_big = await publish_small.function(_Ctx(), "big.bin")
-    assert "上限" in too_big["error"]
+    too_big = await publish_small.function(_Ctx(), ["big.bin"])
+    assert "上限" in too_big["failed"][0]["error"]
 
     bare = LocalWorkspace(settings, None, uuid.uuid4(), "run-pub3")
     await bare.put_file("a.txt", "hi")
@@ -212,7 +259,7 @@ async def test_publish_file_errors(tmp_path: Path, db_session_factory: Any) -> N
         for tool in workspace_tools(bare, db_session_factory, owner_id=None, settings=settings)
         if tool.name == "publish_file"
     )
-    assert "对象存储未启用" in (await publish_bare.function(_Ctx(), "a.txt"))["error"]
+    assert "对象存储未启用" in (await publish_bare.function(_Ctx(), ["a.txt"]))["error"]
 
 
 async def test_list_files_lists_direct_children_and_errors(tmp_path: Path) -> None:
@@ -227,6 +274,51 @@ async def test_list_files_lists_direct_children_and_errors(tmp_path: Path) -> No
     assert next(entry for entry in root["entries"] if entry["name"] == "notes")["directory"] is True
     missing = await ws.list_files("nope")
     assert "error" in missing
+
+
+async def test_local_list_files_pattern_and_recursive(tmp_path: Path) -> None:
+    ws = _local(tmp_path)
+    await ws.put_file("notes/a.md", "hi")
+    await ws.put_file("notes/b.txt", "hi")
+    await ws.put_file("root.md", "hi")
+
+    filtered = await ws.list_files(pattern="*.md", recursive=True)
+    assert {entry["path"] for entry in filtered["entries"]} == {"notes/a.md", "root.md"}
+    direct = await ws.list_files("notes", pattern="*.txt")
+    assert [entry["name"] for entry in direct["entries"]] == ["b.txt"]
+
+
+async def test_local_grep_files_finds_matches(tmp_path: Path) -> None:
+    ws = _local(tmp_path)
+    await ws.put_file("notes/a.md", "alpha\nTODO: fix\n")
+    await ws.put_file("b.txt", "todo lower\n")
+
+    out = await ws.grep_files("TODO", glob="*.md")
+    assert out["matches"] == [{"path": "notes/a.md", "line": 2, "text": "TODO: fix"}]
+    assert out["count"] == 1 and out["truncated"] is False
+
+    with pytest.raises(WorkspaceError, match="正则"):
+        await ws.grep_files("(")
+
+
+async def test_read_file_missing_lists_available(tmp_path: Path) -> None:
+    ws = _local(tmp_path)
+    await ws.put_file("note.md", "hi")
+
+    missing = await ws.read_file("nope.md")
+    assert "不在工作区" in missing["error"]
+    assert {entry["name"] for entry in missing["available"]} == {"note.md"}
+
+
+def test_clip_output_keeps_head_and_tail() -> None:
+    text = "\n".join(str(index) for index in range(2_000))
+    clipped, truncated = clip_output(text, 1_000)
+
+    assert truncated is True
+    assert clipped.startswith("0")
+    assert clipped.endswith("1999")
+    assert "中间省略" in clipped
+    assert clip_output("short", 1_000) == ("short", False)
 
 
 # ------------------------------------------------------------------ SandboxWorkspace
@@ -245,6 +337,13 @@ class _FakeFormats:
 
     async def write(self, path: str, data: bytes, request_timeout: float | None = None) -> None:
         self.written[path] = data
+
+    async def write_files(
+        self, entries: list[dict[str, Any]], request_timeout: float | None = None
+    ) -> list[Any]:
+        for entry in entries:
+            self.written[entry["path"]] = entry["data"]
+        return [SimpleNamespace(path=entry["path"]) for entry in entries]
 
     async def read(self, path: str, format: str = "text") -> bytes:
         self.reads.append(path)
@@ -272,13 +371,58 @@ class _FakeFormats:
 
 
 class _FakeCommands:
-    def __init__(self, exit_code: int = 0) -> None:
+    def __init__(self, files: _FakeFormats | None = None, exit_code: int = 0) -> None:
+        self._files = files
         self.exit_code = exit_code
         self.calls: list[dict[str, Any]] = []
 
     async def run(self, command: str, cwd: str | None = None, timeout: float = 60) -> Any:  # noqa: ASYNC109
         self.calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+        if self._files is not None and ">>" in command:
+            return self._append(command)
+        if self._files is not None and "awk" in command:
+            return self._awk(command)
         return SimpleNamespace(exit_code=self.exit_code, stdout="did run", stderr="")
+
+    def _awk(self, command: str) -> Any:
+        tokens = shlex.split(command)
+        options = {
+            token[0]: int(token[2:]) for token in tokens if token.startswith(("s=", "e="))
+        }
+        assert self._files is not None
+        data = self._files.written.get(tokens[-1])
+        if data is None:
+            return SimpleNamespace(exit_code=2, stdout="", stderr="")
+        lines = data.decode("utf-8", errors="replace").splitlines()
+        chunk = lines[options["s"] - 1 : options["e"]]
+        output = "".join(f"{line}\n" for line in chunk)
+        output += f"__PIGEON_TOTAL__{len(lines)}\n"
+        return SimpleNamespace(exit_code=0, stdout=output, stderr="")
+
+    def _append(self, command: str) -> Any:
+        tokens = shlex.split(command)
+        assert self._files is not None
+        if "!" in tokens:
+            target = tokens[tokens.index("!") + 2]
+            if target not in self._files.written:
+                return SimpleNamespace(exit_code=3, stdout="", stderr="")
+        marker = tokens.index(">>")
+        source, target = tokens[marker - 1], tokens[marker + 1]
+        data = self._files.written.pop(source, b"")
+        self._files.written[target] = self._files.written.get(target, b"") + data
+        return SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+
+class _ScriptedCommands(_FakeCommands):
+    """固定输出的命令假件；用于范围读、递归列表和 grep 的命令解析测试。"""
+
+    def __init__(self, stdout: str, exit_code: int = 0) -> None:
+        super().__init__(exit_code=exit_code)
+        self.stdout = stdout
+
+    async def run(self, command: str, cwd: str | None = None, timeout: float = 60) -> Any:  # noqa: ASYNC109
+        self.calls.append({"command": command, "cwd": cwd, "timeout": timeout})
+        return SimpleNamespace(exit_code=self.exit_code, stdout=self.stdout, stderr="")
 
 
 class _FakeSandbox:
@@ -286,7 +430,7 @@ class _FakeSandbox:
 
     def __init__(self) -> None:
         self.files = _FakeFormats()
-        self.commands = _FakeCommands()
+        self.commands = _FakeCommands(self.files)
 
     async def beta_pause(self) -> None:
         self.paused = True
@@ -347,6 +491,11 @@ class _BrokenFiles(_FakeFormats):
     async def write(self, path: str, data: bytes, request_timeout: float | None = None) -> None:
         raise OSError("envd down")
 
+    async def write_files(
+        self, entries: list[dict[str, Any]], request_timeout: float | None = None
+    ) -> list[Any]:
+        raise OSError("envd down")
+
 
 async def test_sandbox_resolve_files_reports_write_failure(db_session: AsyncSession) -> None:
     body = b"x"
@@ -401,12 +550,68 @@ async def test_sandbox_workspace_appends_in_order() -> None:
     assert saved["append"] is True
     assert saved["size"] == 3
     assert sandbox.files.written[f"{ws.root}/a.txt"] == b"onetwo"
+    # 追加不再整份读回：读请求应该一次都没发生
+    assert sandbox.files.reads == []
+    assert any(">>" in call["command"] for call in sandbox.commands.calls)
 
 
 async def test_sandbox_append_requires_existing_file() -> None:
     ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-append-missing", _FakeSandbox())
     with pytest.raises(WorkspaceError, match="append=false"):
         await ws.put_file("missing.txt", "x", append=True)
+
+
+async def test_sandbox_read_file_range_uses_server_side_awk() -> None:
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-range", sandbox)
+    target = f"{ws.root}/big.txt"
+    sandbox.files.written[target] = b"x" * (300 * 1024)
+    sandbox.commands = _ScriptedCommands("line2\nline3\n__PIGEON_TOTAL__5\n")
+
+    out = await ws.read_file("big.txt", offset=2, limit=2)
+
+    assert out["lines"] == ["     2: line2", "     3: line3"]
+    assert out["total_lines"] == 5
+    assert sandbox.files.reads == []
+    assert "awk" in sandbox.commands.calls[0]["command"]
+
+
+async def test_sandbox_grep_files_parses_nul_output() -> None:
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-grep", sandbox)
+    sandbox.commands = _ScriptedCommands("notes/a.md\x0012:TODO: fix\n")
+
+    out = await ws.grep_files("TODO", max_results=10)
+
+    assert out["matches"] == [{"path": "notes/a.md", "line": 12, "text": "TODO: fix"}]
+    assert out["truncated"] is False
+    assert "grep -rInZE" in sandbox.commands.calls[0]["command"]
+
+
+async def test_sandbox_run_script_uses_python_and_clips_output() -> None:
+    sandbox = _FakeSandbox()
+    sandbox.commands = _ScriptedCommands("x" * 20_000)
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-script", sandbox)
+
+    out = await ws.run_script("print('ok')", 15)
+
+    assert "python3 -c" in sandbox.commands.calls[0]["command"]
+    assert out["exit_code"] == 0
+    assert out["truncated"] is True
+    assert len(out["stdout"]) < 17_000
+
+
+async def test_sandbox_list_files_recursive_uses_find() -> None:
+    sandbox = _FakeSandbox()
+    ws = SandboxWorkspace(FakeStorage(), uuid.uuid4(), "run-tree", sandbox)
+    sandbox.commands = _ScriptedCommands("d\tnotes\nf\tnotes/a.md\nf\troot.txt\n")
+
+    out = await ws.list_files(recursive=True, pattern="*.md")
+
+    assert {entry["path"] for entry in out["entries"]} == {"notes", "notes/a.md", "root.txt"}
+    assert next(entry for entry in out["entries"] if entry["path"] == "notes")["directory"] is True
+    assert "find" in sandbox.commands.calls[0]["command"]
+    assert "-name '*.md'" in sandbox.commands.calls[0]["command"]
 
 
 async def test_sandbox_list_files_lists_direct_children() -> None:
@@ -463,10 +668,10 @@ async def test_sandbox_workspace_starts_lazily_and_reuses() -> None:
 # ------------------------------------------------------------------ 兜底
 
 
-async def test_default_run_command_is_unavailable(tmp_path: Path) -> None:
+async def test_default_run_tools_are_unavailable(tmp_path: Path) -> None:
     ws = _local(tmp_path)
-    result = await ws.run_command("ls")
-    assert "error" in result
+    assert "error" in await ws.run_command("ls")
+    assert "error" in await ws.run_script("print(1)")
 
 
 async def test_load_files_absent_without_storage(tmp_path: Path) -> None:

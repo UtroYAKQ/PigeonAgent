@@ -52,10 +52,29 @@ class RunWorkspace(abc.ABC):
         """按相对路径读原始字节；超过 max_bytes 时抛 WorkspaceError。"""
 
     @abc.abstractmethod
-    async def list_files(self, subdir: str = ".") -> dict[str, Any]: ...
+    async def list_files(
+        self,
+        subdir: str = ".",
+        *,
+        pattern: str | None = None,
+        recursive: bool = False,
+    ) -> dict[str, Any]: ...
+
+    @abc.abstractmethod
+    async def grep_files(
+        self,
+        pattern: str,
+        subdir: str = ".",
+        glob: str | None = None,
+        max_results: int = 50,
+    ) -> dict[str, Any]:
+        """按正则检索工作区文本，返回 path/line/text 命中列表。"""
 
     async def run_command(self, command: str, timeout_seconds: int = 120) -> dict[str, Any]:
         return {"error": "当前模式是本地工作区，没有命令执行；配好沙箱（SANDBOX_API_KEY）再来"}
+
+    async def run_script(self, code: str, timeout_seconds: int = 120) -> dict[str, Any]:
+        return {"error": "当前模式是本地工作区，没有脚本执行；配好沙箱（SANDBOX_API_KEY）再来"}
 
     async def cleanup(self) -> None:  # noqa: B027 - 沙箱随 kill 一起没，不需要额外清理
         ...

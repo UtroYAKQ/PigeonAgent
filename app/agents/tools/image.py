@@ -82,9 +82,10 @@ def make_generate_image(
         storage = get_storage()
         saved: list[dict[str, Any]] = []
         alt = prompt.strip()[:80]
-        for image in images:
-            name = f"generated-{uuid4().hex[:10]}.{extension_for(image.media_type)}"
-            async with session_factory() as db:
+        # 一批图共用一次会话：出图慢在等上游，别让建会话的次数跟着张数涨
+        async with session_factory() as db:
+            for image in images:
+                name = f"generated-{uuid4().hex[:10]}.{extension_for(image.media_type)}"
                 file = await file_service.direct_upload(
                     db,
                     settings,
@@ -94,30 +95,30 @@ def make_generate_image(
                     image.media_type,
                     image.data,
                 )
-            file_id = str(file.id)
-            size_bytes = len(image.data)
-            saved.append(
-                {
-                    "file_id": file_id,
-                    "name": name,
-                    "media_type": image.media_type,
-                    "size": size_bytes,
-                    "alt": alt,
-                }
-            )
-            # 逐张通知 turn 落库并推给前端；工具本身不碰 run content
-            await ctx.emit(
-                ImageGeneratedEvent(
-                    media=ArtifactMedia(
-                        file_id=file_id,
-                        name=name,
-                        media_type=image.media_type,
-                        size=size_bytes,
-                        alt=alt,
-                        origin="generated",
+                file_id = str(file.id)
+                size_bytes = len(image.data)
+                saved.append(
+                    {
+                        "file_id": file_id,
+                        "name": name,
+                        "media_type": image.media_type,
+                        "size": size_bytes,
+                        "alt": alt,
+                    }
+                )
+                # 逐张通知 turn 落库并推给前端；工具本身不碰 run content
+                await ctx.emit(
+                    ImageGeneratedEvent(
+                        media=ArtifactMedia(
+                            file_id=file_id,
+                            name=name,
+                            media_type=image.media_type,
+                            size=size_bytes,
+                            alt=alt,
+                            origin="generated",
+                        )
                     )
                 )
-            )
 
         if owner_id is not None and saved:
             # 出图成功才扣；失败分支上游根本没给字节

@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 MAX_QUERY_CHARS = 128
 MAX_URL_CHARS = 8192
 MAX_SEARCH_RESULTS = 10
+MAX_SUMMARY_CHARS = 800
+MAX_SNIPPET_CHARS = 400
 MAX_FETCH_CHARS = 30_000
+MIN_FETCH_CHARS = 1_000
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
 
 
@@ -125,8 +128,8 @@ def _normalize_search_results(data: dict[str, Any], limit: int) -> list[dict[str
             {
                 "title": title.strip()[:300],
                 "url": url.strip(),
-                "snippet": str(raw.get("snippet") or "")[:600],
-                "summary": str(raw.get("summary") or "")[:1600],
+                "snippet": str(raw.get("snippet") or "")[:MAX_SNIPPET_CHARS],
+                "summary": str(raw.get("summary") or "")[:MAX_SUMMARY_CHARS],
                 "site_name": raw.get("site_name"),
                 "site_icon": raw.get("site_icon"),
                 "date": raw.get("date"),
@@ -174,11 +177,12 @@ class WebTools:
                 "error": describe_error(exc, include_type=True),
             }
 
-    async def fetch_url(self, url: str) -> dict[str, Any]:
+    async def fetch_url(self, url: str, max_chars: int | None = None) -> dict[str, Any]:
         """抓取单个网页，返回标题和 Markdown 正文，适合读取搜索结果详情。
 
         Args:
             url: 要抓取的 http/https 网页地址。
+            max_chars: 正文最多返回多少字符，1000~30000；留空用默认上限，需要全文再调大。
         """
         try:
             cleaned_url = _validate_url(url)
@@ -191,8 +195,13 @@ class WebTools:
             content = str(data.get("content") or "")
             if not content.strip():
                 return {"url": cleaned_url, "error": "该页面没有可提取的正文"}
-            if len(content) > MAX_FETCH_CHARS:
-                content = content[:MAX_FETCH_CHARS] + "\n\n[正文过长，已截断]"
+            limit = (
+                MAX_FETCH_CHARS
+                if max_chars is None
+                else max(MIN_FETCH_CHARS, min(int(max_chars), MAX_FETCH_CHARS))
+            )
+            if len(content) > limit:
+                content = content[:limit] + "\n\n[正文过长，已截断]"
             title = str(data.get("title") or "")
             return {"url": cleaned_url, "title": title, "content": content}
         except WebToolError as exc:

@@ -14,7 +14,7 @@ from app.agents.tools.image import make_generate_image, make_read_image
 from app.agents.tools.web import web_search_tools
 from app.agents.tools.workspace import workspace_instructions, workspace_tools
 from app.core.config import Settings
-from app.sandbox.workspace import RunWorkspace
+from app.sandbox.workspace import RunWorkspace, SandboxWorkspace
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +83,7 @@ def build_tool_bundle(
         workspace_instructions(
             include_workspace=has_workspace_tools,
             include_read_image=can_read_image,
+            include_run_tools=isinstance(workspace, SandboxWorkspace),
         )
         or None
     )
