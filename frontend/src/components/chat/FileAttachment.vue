@@ -3,9 +3,11 @@ import { computed, inject, ref } from 'vue'
 import { Download, Eye, FileText, Loader2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 
+import { adminApi } from '@/api/admin'
 import { filesApi } from '@/api/files'
 import { TooltipHint } from '@/components/ui/tooltip'
 import { saveBlob } from '@/lib/fileDownload'
+import { FILE_SCOPE_KEY } from '@/lib/fileScope'
 import { formatBytes } from '@/lib/format'
 import { PANEL_HOST_KEY } from '@/lib/panelHost'
 import { useChatStore } from '@/stores/chat'
@@ -27,13 +29,13 @@ const props = withDefaults(defineProps<{
 const chat = useChatStore()
 const panels = usePanelStore()
 const panelHost = inject(PANEL_HOST_KEY, false)
+const fileScope = inject(FILE_SCOPE_KEY, { admin: false })
 const downloading = ref(false)
 
 const canPreview = computed(() => (
   props.previewable
-  && panelHost
   && Boolean(props.fileId)
-  && Boolean(chat.currentSessionId)
+  && (fileScope.admin ? Boolean(fileScope.preview) : panelHost && Boolean(chat.currentSessionId))
 ))
 
 const extension = computed(() => {
@@ -42,7 +44,17 @@ const extension = computed(() => {
 })
 
 async function preview(): Promise<void> {
-  if (!canPreview.value || !props.fileId || !chat.currentSessionId) return
+  if (!canPreview.value || !props.fileId) return
+  if (fileScope.admin) {
+    fileScope.preview?.({
+      fileId: props.fileId,
+      name: props.name,
+      mediaType: props.mediaType ?? null,
+      size: props.size ?? null,
+    })
+    return
+  }
+  if (!chat.currentSessionId) return
   panels.openFile({
     sessionId: chat.currentSessionId,
     title: props.name,
@@ -59,7 +71,9 @@ async function download(): Promise<void> {
   try {
     let blob: Blob
     if (props.fileId) {
-      blob = await filesApi.content(props.fileId)
+      blob = fileScope.admin
+        ? await adminApi.fileContent(props.fileId)
+        : await filesApi.content(props.fileId)
     } else if (props.data) {
       const response = await fetch(`data:${props.mediaType || 'application/octet-stream'};base64,${props.data}`)
       blob = await response.blob()

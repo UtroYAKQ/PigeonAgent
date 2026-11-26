@@ -1,3 +1,4 @@
+import { adminApi } from '@/api/admin'
 import { filesApi } from '@/api/files'
 
 /**
@@ -114,11 +115,15 @@ function remember(fileId: string, task: Promise<Blob>): Promise<Blob> {
   return task
 }
 
-export function loadCachedImage(fileId: string): Promise<Blob> {
-  const pending = memory.get(fileId)
+export function loadCachedImage(fileId: string, admin = false): Promise<Blob> {
+  const cacheKey = admin ? `admin:${fileId}` : fileId
+  const pending = memory.get(cacheKey)
   if (pending) return pending
 
   const task = (async () => {
+    if (admin) {
+      return adminApi.fileContent(fileId)
+    }
     const db = await openDatabase()
     const cached = db ? await readStored(db, fileId) : null
     if (cached) return cached
@@ -126,6 +131,6 @@ export function loadCachedImage(fileId: string): Promise<Blob> {
     void writeStored(fileId, blob)
     return blob
   })()
-  task.catch(() => memory.delete(fileId))
-  return remember(fileId, task)
+  task.catch(() => memory.delete(cacheKey))
+  return remember(cacheKey, task)
 }

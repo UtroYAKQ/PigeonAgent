@@ -208,6 +208,24 @@ async def content_of(
     返回的最后一个值是内容 sha256；文件记录指向的字节不会变，可直接当强 ETag。
     """
     file = await _owned_file(db, owner, file_id)
+    return await _content_of_record(db, storage, file)
+
+
+async def admin_content_of(
+    db: AsyncSession,
+    storage: ObjectStorage,
+    file_id: uuid.UUID,
+) -> tuple[bytes, str, str, str]:
+    """管理员只读读取：会话审计时允许查看他人文件，但不改变归属语义。"""
+    file = await readable(db, file_id)
+    return await _content_of_record(db, storage, file)
+
+
+async def _content_of_record(
+    db: AsyncSession,
+    storage: ObjectStorage,
+    file: FileRecord,
+) -> tuple[bytes, str, str, str]:
     blob = await db.get(Blob, file.blob_hash)
     if blob is None:
         raise GoneError("文件内容已被清理，无法下载")

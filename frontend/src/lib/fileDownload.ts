@@ -1,3 +1,4 @@
+import { adminApi } from '@/api/admin'
 import { filesApi } from '@/api/files'
 
 export function saveBlob(blob: Blob, name: string): void {
@@ -12,6 +13,7 @@ export function saveBlob(blob: Blob, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export async function downloadFile(fileId: string, name: string): Promise<void> {
-  saveBlob(await filesApi.content(fileId), name)
+export async function downloadFile(fileId: string, name: string, admin = false): Promise<void> {
+  const blob = admin ? await adminApi.fileContent(fileId) : await filesApi.content(fileId)
+  saveBlob(blob, name)
 }

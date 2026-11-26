@@ -89,6 +89,15 @@ export const adminApi = {
     return `${API_BASE_URL}/admin/sessions/${id}/runs/${runId}/events?after=${after}`
   },
 
+  async fileContent(fileId: string, signal?: AbortSignal): Promise<Blob> {
+    const { data } = await http.get<Blob>(`/admin/files/${fileId}/content`, {
+      responseType: 'blob',
+      signal,
+      timeout: 60_000,
+    })
+    return data
+  },
+
   async updateSession(id: string, status: SessionStatus): Promise<AdminSession> {
     const { data } = await http.patch<AdminSession>(`/admin/sessions/${id}`, { status })
     return data

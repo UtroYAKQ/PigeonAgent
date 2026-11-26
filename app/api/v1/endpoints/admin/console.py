@@ -1,12 +1,14 @@
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import AdminUserDep, OperationLoggerDep, RenderHubDep, SessionDep
 from app.core.exceptions import GoneError, UnprocessableError
 from app.enums import SessionStatus
+from app.infra.files.storage import get_storage
 from app.render.queue import RenderCursorInvalid
 from app.render.sse import encode_consumer
 from app.schemas.admin.console import (
@@ -24,6 +26,7 @@ from app.schemas.admin.console import (
     AdminUserUpdate,
 )
 from app.schemas.run import SessionRunList, SessionRunRead
+from app.services import file_service
 from app.services import user as user_service
 from app.services.admin import audit
 from app.services.admin import service as admin_service
@@ -33,6 +36,40 @@ from app.services.run.tree import branch_navs, path_runs
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 SearchQuery = Annotated[str | None, Query(max_length=128)]
+
+_SAFE_INLINE_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+    "image/bmp",
+    "image/x-icon",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/ogg",
+}
+
+
+def _is_inline_safe(content_type: str | None) -> bool:
+    return (content_type or "").lower() in _SAFE_INLINE_TYPES
+
+
+def _content_headers(name: str, content_type: str, etag: str) -> dict[str, str]:
+    encoded = quote(name, safe="")
+    safe = _is_inline_safe(content_type)
+    disposition = "inline" if safe else "attachment"
+    return {
+        "Content-Type": content_type if safe else "application/octet-stream",
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{encoded}",
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "ETag": f'"{etag}"',
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+    }
 
 
 @router.get("/stats", response_model=AdminStatsRead)
@@ -231,6 +268,17 @@ async def update_session(
         detail={"status": payload.status.value},
     )
     return updated
+
+
+@router.get("/files/{file_id}/content")
+async def read_file_content(
+    file_id: UUID,
+    db: SessionDep,
+    _user: AdminUserDep,
+) -> Response:
+    storage = get_storage()
+    data, name, content_type, etag = await file_service.admin_content_of(db, storage, file_id)
+    return Response(content=data, headers=_content_headers(name, content_type, etag))
 
 
 @router.get("/logs", response_model=AdminOperationLogList)

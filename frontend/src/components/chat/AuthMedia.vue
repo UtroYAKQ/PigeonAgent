@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { inject, onBeforeUnmount, ref, watch } from 'vue'
 import { Loader2 } from '@lucide/vue'
 
+import { adminApi } from '@/api/admin'
 import { filesApi } from '@/api/files'
+import { FILE_SCOPE_KEY } from '@/lib/fileScope'
 import { loadCachedImage } from '@/lib/mediaCache'
 
 const props = withDefaults(
@@ -34,6 +36,7 @@ const REFRESH_MARGIN_MS = 60_000
 // 直链在有效期内复用，按 file_id 缓存，省掉每次挂载重新签一条
 const linkCache = new Map<string, { url: string; expiresAt: number }>()
 
+const fileScope = inject(FILE_SCOPE_KEY, { admin: false })
 const resolved = ref<string | null>(null)
 const loading = ref(false)
 const failed = ref(false)
@@ -60,7 +63,9 @@ async function loadBytes(): Promise<void> {
   const current = new AbortController()
   controller = current
   try {
-    const blob = await filesApi.content(props.fileId, current.signal)
+    const blob = fileScope.admin
+      ? await adminApi.fileContent(props.fileId, current.signal)
+      : await filesApi.content(props.fileId, current.signal)
     if (current.signal.aborted) return
     objectUrl = URL.createObjectURL(blob)
     resolved.value = objectUrl
@@ -78,6 +83,10 @@ async function loadBytes(): Promise<void> {
 async function loadLink(): Promise<void> {
   if (!props.fileId) {
     failed.value = true
+    return
+  }
+  if (fileScope.admin) {
+    await loadBytes()
     return
   }
   const cached = linkCache.get(props.fileId)
@@ -111,7 +120,7 @@ async function loadImage(): Promise<void> {
   const current = new AbortController()
   controller = current
   try {
-    const blob = await loadCachedImage(props.fileId)
+    const blob = await loadCachedImage(props.fileId, fileScope.admin)
     if (current.signal.aborted) return
     objectUrl = URL.createObjectURL(blob)
     resolved.value = objectUrl

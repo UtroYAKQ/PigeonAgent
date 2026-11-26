@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { AlertTriangle, ArrowLeft, Loader2, Radio, RefreshCw } from '@lucide/vue'
 
 import { adminApi } from '@/api/admin'
+import AdminFilePreviewDialog from '@/components/admin/AdminFilePreviewDialog.vue'
 import TurnShell from '@/components/turn/TurnShell.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import { errorMessage } from '@/lib/http'
 import { formatAdminTime } from '@/lib/admin'
 import { formatTokens } from '@/lib/format'
 import { applyAgUiEvent } from '@/lib/agui'
+import { FILE_SCOPE_KEY, type FilePreviewTarget } from '@/lib/fileScope'
 import { StreamGoneError, streamRun } from '@/lib/sse'
 import {
   buildTurnView,
@@ -34,6 +36,16 @@ const loadingEarlier = ref(false)
 const failure = ref<string | null>(null)
 const streamNote = ref<string | null>(null)
 const live = ref<LiveRun | null>(null)
+const previewTarget = ref<FilePreviewTarget | null>(null)
+const previewOpen = ref(false)
+
+provide(FILE_SCOPE_KEY, {
+  admin: true,
+  preview: (target) => {
+    previewTarget.value = target
+    previewOpen.value = true
+  },
+})
 
 let abortController: AbortController | null = null
 let streamGeneration = 0
@@ -313,9 +325,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-else class="py-14 text-center text-sm text-muted-foreground">这个会话还没有消息。</div>
 
-      <p class="border-t border-border pt-4 text-[12px] leading-5 text-muted-foreground">
-        后台只读查看。图片与文件需要原作者登录后才能加载；运行中的会话会自动订阅实时事件。
-      </p>
     </template>
+    <AdminFilePreviewDialog v-model:open="previewOpen" :target="previewTarget" />
   </div>
 </template>
