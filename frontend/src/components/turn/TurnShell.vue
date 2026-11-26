@@ -124,7 +124,7 @@ function blockContext(index: number): BlockContext {
     chainEndedAt: isChat.value && chainCount.value === 1 && !isStreaming.value
       ? props.run.updated_at
       : null,
-    defaultOpen: ui.autoExpandThinking || (isChat.value && props.isLast && index === lastChainIndex.value),
+    defaultOpen: ui.autoExpandThinking,
     defaultDetailsOpen: ui.autoExpandToolDetails,
   }
 }

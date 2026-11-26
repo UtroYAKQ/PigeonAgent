@@ -17,7 +17,7 @@ const OPTIONS: PreferenceOption[] = [
   {
     key: 'autoExpandThinking',
     label: '展开思考过程',
-    description: '历史消息中的思考过程默认展开；正在生成的回复仍会自动展开。',
+    description: '思考过程与思维链默认展开；关闭后可按需手动展开。',
   },
   {
     key: 'autoExpandToolDetails',
